@@ -24,10 +24,11 @@ size = base_pairs / 1e6
 rho = 1e-8
 mu = 1e-8
 
-assert N > sample_size
+assert N >= sample_size
 
 prefix = outpath + '/'
 prefix += 'N' + str(N)
+prefix += 'samplesize' + str(sample_size)
 prefix += 'rec' + str(rho)
 prefix += 'mut' + str(mu)
 prefix += 'length' + str(base_pairs)
