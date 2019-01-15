@@ -2,6 +2,8 @@ import sys, os
 sys.path.append(os.path.expanduser('~/project/msprime'))
 import msprime
 import numpy as np
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import bisect
 from collections import Counter, defaultdict, deque
@@ -170,12 +172,12 @@ class SegmentQueue:
         key = lambda x: x[0]
         self.lineage_times = sorted(lineage_times, key=key, reverse=True)
 
-ts = msprime.simulate(50, Ne=50, length=2e8, recombination_rate=1e-8)
+ts = msprime.simulate(500, Ne=500, length=8e7, recombination_rate=1e-8)
 
 S = SegmentQueue(ts)
 times, num_lineages = S.count_lineages()
 
 plt.plot(times, num_lineages)
-plt.savefig('../results/test_plot.svg')
+plt.savefig('../results/test_plot.png')
 
 
