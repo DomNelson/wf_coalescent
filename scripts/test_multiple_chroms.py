@@ -28,17 +28,20 @@ def main(args):
     Ne = args.Ne
     model = args.model
     sample_size = Ne
-    rho = 1e-8
+    rho = 1e-7
 
     chrom_lengths = [247249719, 242951149, 199501827, 191273063, 180857866,
             170899992, 158821424, 146274826, 140273252, 135374737, 134452384,
             132349534, 114142980, 106368585, 100338915, 88827254, 78774742,
             76117153, 63811651, 62435964, 46944323, 49691432]
+    num_loci = chrom_lengths[-1] + 1
 
     # chrom_lengths = [1e8] * 10
 
     positions, rates = get_positions_rates(chrom_lengths, rho)
-    recombination_map = msprime.RecombinationMap(positions, rates)
+    recombination_map = msprime.RecombinationMap(
+            positions, rates, num_loci=num_loci
+    )
     for p, r in zip(positions, rates):
         print(p, r)
 
