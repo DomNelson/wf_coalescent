@@ -120,8 +120,11 @@ class SegmentQueue:
         in_node = in_candidates[0]
         
         if len(out_candidates) > 1:
-            in_parents = [edge.parent for edge in diff_in]
-            out_candidates = [c for c in out_candidates if c not in in_parents]
+            in_inds = []
+            for edge_in in diff_in:
+                in_inds.extend([edge_in.parent, edge_in.child])
+            # in_parents = [edge.parent for edge in diff_in]
+            out_candidates = [c for c in out_candidates if c not in in_inds]
         
         assert(len(out_candidates) == 1)
         out_node = out_candidates[0]
@@ -172,12 +175,29 @@ class SegmentQueue:
         key = lambda x: x[0]
         self.lineage_times = sorted(lineage_times, key=key, reverse=True)
 
-ts = msprime.simulate(500, Ne=500, length=8e7, recombination_rate=1e-8)
+for model in ['hudson', 'dtwf']:
+    print("Simulating", model)
+    Ne = 500
+    sample_size = Ne
 
-S = SegmentQueue(ts)
-times, num_lineages = S.count_lineages()
+    if model == 'dtwf':
+        ## Wright Fisher model has diploid individuals
+        Ne = int(Ne / 2)
 
-plt.plot(times, num_lineages)
+    ts = msprime.simulate(
+            sample_size=sample_size,
+            Ne=Ne,
+            length=1e8,
+            recombination_rate=1e-8,
+            model=model
+            )
+    S = SegmentQueue(ts)
+    times, num_lineages = S.count_lineages()
+    plt.plot(times, num_lineages)
+
+plt.ylabel("Number of Lineages")
+plt.xlabel("Generation")
+# plt.xlim((0, 100))
 plt.savefig('../results/test_plot.png')
 
 
