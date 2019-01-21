@@ -8,6 +8,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import seaborn as sns
 import argparse
+import pandas as pd
 
 
 def get_positions_rates(chrom_lengths, rho):
@@ -57,19 +58,24 @@ def get_ind_tracts(ts, max_time):
     return ind_tracts
 
 
-def get_ancestry_props(ts, max_time):
-    ind_tracts = get_ind_tracts(ts, max_time)
-    total_length = ts.get_sequence_length()
+def get_ancestry_props(replicates, max_time):
     ancestry_props = []
-    
-    for sample in ts.samples():
-        prop = sum(ind_tracts[sample]) / total_length
-        ancestry_props.append(prop)
+
+    for ts in replicates:
+        ind_tracts = get_ind_tracts(ts, max_time)
+        total_length = ts.get_sequence_length()
+
+        replicate_props = []
+        for sample in ts.samples():
+            prop = sum(ind_tracts[sample]) / total_length
+            replicate_props.append(prop)
+
+        ancestry_props.append(replicate_props)
         
     return ancestry_props
 
 
-def simulate(args):
+def simulate(args, admixture_time):
     rho = 1e-8
     all_lengths = [247249719, 242951149, 199501827, 191273063, 180857866,
             170899992, 158821424, 146274826, 140273252, 135374737, 134452384,
@@ -83,60 +89,104 @@ def simulate(args):
             positions, rates, num_loci=num_loci)
 
     population_configurations = [
-        msprime.PopulationConfiguration(sample_size=1000, initial_size=1000),
-        msprime.PopulationConfiguration(sample_size=0, initial_size=1000),
+            msprime.PopulationConfiguration(
+                    sample_size=args.Ne,
+                    initial_size=args.Ne
+            ),
+            msprime.PopulationConfiguration(
+                    sample_size=0,
+                    initial_size=args.Ne
+            )
     ]
 
     demographic_events = [
         msprime.MassMigration(
-            time=args.admixture_time,
+            time=admixture_time,
             source=0,
             dest=1,
             proportion=args.admixture_prop
         ),
         msprime.MassMigration(
-            time=args.admixture_time + 1,
+            time=admixture_time + 1,
             source=1,
             dest=0,
             proportion=1
         ),
         msprime.PopulationParametersChange(
-            time=args.admixture_time + 2,
+            time=admixture_time + 2,
             initial_size=1.0,
             population_id=0
         )
     ]
 
-    ts = msprime.simulate(
+    replicates = msprime.simulate(
             recombination_map=recombination_map,
             demographic_events=demographic_events,
             population_configurations=population_configurations,
             model=args.model,
-            record_migrations=True
+            record_migrations=True,
+            num_replicates=args.replicates
     )
 
-    return ts
+    return replicates
+
+
+def get_output_suffix(args, admixture_time):
+    suffix = 'admixture_props_'
+    suffix += 'Ne' + '_' + str(args.Ne) + '_'
+    suffix += 'model' + '_' + str(args.model) + '_'
+    suffix += 'admix_time' + '_' + str(admixture_time) + '_'
+    suffix += 'admix_prop' + '_' + str(args.admixture_prop) + '_'
+    suffix += 'nchroms' + '_' + str(args.num_chroms)
+
+    return suffix
 
 
 def main(args):
-    ts = simulate(args)
-    props = get_ancestry_props(ts, args.admixture_time)
-    print("Ancestry mean:", np.mean(props), "variance:", np.var(props))
+    admixture_range = [int(x.strip()) for x in args.admixture_range.split(',')]
+    admixture_times = range(*admixture_range)
+    
+    nrows = len(admixture_times)
+    ncols = args.replicates
+    variance_array = np.zeros([nrows, ncols])
 
-    basename, ext = os.path.splitext(args.out_file)
-    plt.hist(props)
-    plot_file = basename + '.png'
-    plt.savefig(plot_file)
+    df = pd.DataFrame()
+    for i, t in enumerate(admixture_times):
+        print(t)
+        replicates = simulate(args, admixture_time=t)
+        props_replicates = get_ancestry_props(replicates, max_time=t)
+
+        bins = np.arange(0, 1.1, 0.1)
+        for j, props in enumerate(props_replicates):
+            # print("Ancestry mean:", np.mean(props), "variance:", np.var(props))
+            # plt.hist(props, alpha=0.3, bins=bins)
+            variance_array[i, j] = np.var(props)
+
+    df = pd.DataFrame(
+            variance_array,
+            columns=range(args.replicates),
+            index=admixture_times)
+
+    fig, ax = plt.subplots()
+    average_variance = df.var(axis=1)
+    average_variance.plot(ax=ax, logx=True, logy=True)
+
+    basename, ext = os.path.splitext(args.out_dir)
+    suffix = get_output_suffix(args, admixture_time=t)
+    plot_file = basename + suffix + '.png'
+    fig.savefig(plot_file)
+    # import IPython; IPython.embed()
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--Ne", type=float, default=1000)
+    parser.add_argument("--Ne", type=int, default=80)
     parser.add_argument('--model', default='Hudson')
-    parser.add_argument('--admixture_time', type=float, default=1)
-    parser.add_argument('--admixture_prop', type=float, default=0.2)
-    parser.add_argument('--num_chroms', type=int, default=1)
-    parser.add_argument('--out_file', default='admixture_props.txt')
+    parser.add_argument('--admixture_range', default="0,10")
+    parser.add_argument('--admixture_prop', type=float, default=0.3)
+    parser.add_argument('--num_chroms', type=int, default=22)
+    parser.add_argument('--replicates', type=int, default=1)
+    parser.add_argument('--out_dir', default='admixture_props.txt')
 
     args = parser.parse_args()
     main(args)
