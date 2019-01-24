@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import argparse
 import pandas as pd
+from tqdm import tqdm
 
 
 def get_positions_rates(chrom_lengths, rho):
@@ -58,19 +59,24 @@ def get_ind_tracts(ts, max_time):
     return ind_tracts
 
 
-def get_ancestry_props(replicates, max_time):
+def get_ancestry_props(replicates, max_time, num_replicates):
     ancestry_props = []
 
-    for ts in replicates:
-        ind_tracts = get_ind_tracts(ts, max_time)
-        total_length = ts.get_sequence_length()
+    with tqdm(total=num_replicates, desc=str(max_time)) as pbar:
+        for ts in replicates:
+            ind_tracts = get_ind_tracts(ts, max_time)
+            total_length = ts.get_sequence_length()
 
-        replicate_props = []
-        for sample in ts.samples():
-            prop = sum(ind_tracts[sample]) / total_length
-            replicate_props.append(prop)
+            replicate_props = []
+            samples = iter(ts.samples())
+            for sample in samples:
+                sample_copy = next(samples)
+                prop = sum(ind_tracts[sample]) / total_length
+                prop_copy = sum(ind_tracts[sample_copy]) / total_length
+                replicate_props.append(np.mean([prop, prop_copy]))
 
-        ancestry_props.append(replicate_props)
+            ancestry_props.append(replicate_props)
+            pbar.update(1)
         
     return ancestry_props
 
@@ -90,7 +96,7 @@ def simulate(args, admixture_time):
 
     population_configurations = [
             msprime.PopulationConfiguration(
-                    sample_size=args.Ne,
+                    sample_size=args.sample_size,
                     initial_size=args.Ne
             ),
             msprime.PopulationConfiguration(
@@ -132,7 +138,7 @@ def simulate(args, admixture_time):
 
 
 def get_output_suffix(args, admixture_time):
-    suffix = 'admixture_props_'
+    suffix = 'ancestry_variance'
     suffix += 'Ne' + '_' + str(args.Ne) + '_'
     suffix += 'model' + '_' + str(args.model) + '_'
     suffix += 'admix_time' + '_' + str(admixture_time) + '_'
@@ -149,31 +155,32 @@ def main(args):
     nrows = len(admixture_times)
     ncols = args.replicates
     variance_array = np.zeros([nrows, ncols])
+    bins = np.arange(0, 1.1, 0.1)
 
     df = pd.DataFrame()
     for i, t in enumerate(admixture_times):
-        print(t)
         replicates = simulate(args, admixture_time=t)
-        props_replicates = get_ancestry_props(replicates, max_time=t)
+        props_replicates = get_ancestry_props(
+                replicates,
+                max_time=t,
+                num_replicates=args.replicates)
 
-        bins = np.arange(0, 1.1, 0.1)
         for j, props in enumerate(props_replicates):
-            # print("Ancestry mean:", np.mean(props), "variance:", np.var(props))
-            # plt.hist(props, alpha=0.3, bins=bins)
             variance_array[i, j] = np.var(props)
 
     df = pd.DataFrame(
             variance_array,
             columns=range(args.replicates),
             index=admixture_times)
+    average_variance = df.mean(axis=1)
+
+    basedir, ext = os.path.splitext(args.out_dir)
+    suffix = get_output_suffix(args, admixture_time=t)
+    average_variance.to_csv(os.path.join(basedir, suffix + '.txt'))
 
     fig, ax = plt.subplots()
-    average_variance = df.var(axis=1)
     average_variance.plot(ax=ax, logx=True, logy=True)
-
-    basename, ext = os.path.splitext(args.out_dir)
-    suffix = get_output_suffix(args, admixture_time=t)
-    plot_file = basename + suffix + '.png'
+    plot_file = os.path.join(basedir, suffix + '.png')
     fig.savefig(plot_file)
     # import IPython; IPython.embed()
 
@@ -181,12 +188,13 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--Ne", type=int, default=80)
+    parser.add_argument("--sample_size", type=int, default=80)
     parser.add_argument('--model', default='Hudson')
-    parser.add_argument('--admixture_range', default="0,10")
+    parser.add_argument('--admixture_range', default="1,10")
     parser.add_argument('--admixture_prop', type=float, default=0.3)
     parser.add_argument('--num_chroms', type=int, default=22)
     parser.add_argument('--replicates', type=int, default=1)
-    parser.add_argument('--out_dir', default='admixture_props.txt')
+    parser.add_argument('--out_dir', default='../results/ancestry_variance/')
 
     args = parser.parse_args()
     main(args)
