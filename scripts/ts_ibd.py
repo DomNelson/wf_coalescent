@@ -219,6 +219,11 @@ class EdgeList:
         for ind1, ind2, start in zip(coo.row, coo.col, coo.data):
             pair = (ind1, ind2)
             self.write_ibd_pair(ibd_start, ibd_end, pair)
+
+
+    def write_ibd_to_file(self, out_file):
+            out_array = np.array(self.ibd_list)
+            np.savez_compressed(out_file, ibd_array=out_array)
         
                 
     def get_ibd(self):
@@ -256,32 +261,30 @@ class EdgeList:
         self.write_ibd_all(ibd_start, ibd_end)
         
         
-    def plot_ibd(self, min_length=0, out_file=None):
-        if out_file is None:
-            out_file = os.path.expanduser('~/temp/ibd_plot.png')
-            
-        cols = ["ind1", "ind2", "start", "end"]
+def plot_ibd(ibd_list, min_length=0, out_file=None):
+    if out_file is None:
+        out_file = os.path.expanduser('~/temp/ibd_plot.png')
+	
+    cols = ["ind1", "ind2", "start", "end"]
 
-        ibd_df = pd.DataFrame(self.ibd_list, columns=cols)
-        ibd_df['len'] = ibd_df['end'] - ibd_df['start']
-        ibd_df = ibd_df[ibd_df['len'] >= min_length]
-        
-        ibd_df['count'] = 1
-        for ind in set(ibd_df['ind1'].values):
-            ind_df = ibd_df[ibd_df['ind1'] == ind]
-            ind_pairwise_ibd_df = ind_df.groupby('ind2').sum()
+    ibd_df = pd.DataFrame(ibd_list, columns=cols)
+    ibd_df['len'] = ibd_df['end'] - ibd_df['start']
+    ibd_df = ibd_df[ibd_df['len'] >= min_length]
+    
+    ibd_df['count'] = 1
+    for ind in set(ibd_df['ind1'].values):
+        ind_df = ibd_df[ibd_df['ind1'] == ind]
+        ind_pairwise_ibd_df = ind_df.groupby('ind2').sum()
 
-            total_IBD = ind_pairwise_ibd_df['len'].values
-            num_segments = ind_pairwise_ibd_df['count'].values
+        total_IBD = ind_pairwise_ibd_df['len'].values
+        num_segments = ind_pairwise_ibd_df['count'].values
 
-            plt.plot(total_IBD, num_segments, 'o')
+        plt.plot(total_IBD, num_segments, 'o')
 
-        plt.ylabel('Number of IBD segments')
-        plt.xlabel('Total IBD')
-        plt.xscale('log')
-        plt.savefig(out_file)
-
-        plt.show()
+    plt.ylabel('Number of IBD segments')
+    plt.xlabel('Total IBD')
+    plt.xscale('log')
+    plt.savefig(out_file)
 
 
 if __name__ == "__main__":
@@ -291,18 +294,21 @@ if __name__ == "__main__":
             132349534, 114142980, 106368585, 100338915, 88827254, 78774742,
             76117153, 63811651, 62435964, 46944323, 49691432]
     num_loci = chrom_lengths[-1] + 1
+    # chrom_lengths = chrom_lengths[:3]
 
     positions, rates = get_positions_rates(chrom_lengths, rho)
     recombination_map = msprime.RecombinationMap(
             positions, rates, num_loci=num_loci
     )
     population_configuration = msprime.PopulationConfiguration(
-	sample_size=500,
+	sample_size=100,
 	initial_size=500
     )
 
-    ts = msprime.simulate(population_configurations=[population_configuration], model='dtwf', recombination_map=recombination_map)
+    model = 'dtwf'
+    outfile = '/gs/scratch/dnelson/project/wf_coalescent/Ne500_samples100_WG_' + model # .npz extension is added by numpy
+    ts = msprime.simulate(population_configurations=[population_configuration], model=model, recombination_map=recombination_map)
 
     e = EdgeList(ts, 10)
     e.get_ibd()
-    e.plot_ibd(min_length=1e4, out_file='test_plot.png')
+    e.write_ibd_to_file(out_file=outfile)
