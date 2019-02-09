@@ -1,5 +1,6 @@
 import sys, os
 sys.path.append('../../msprime')
+sys.path.append('../../msprime/lib/subprojects/git-submodules/tskit/python')
 import msprime
 import collections
 import numpy as np
@@ -72,8 +73,7 @@ def get_ancestry_props(replicates, max_time, num_replicates):
             for sample in samples:
                 sample_copy = next(samples)
                 prop = sum(ind_tracts[sample]) / total_length
-                prop_copy = sum(ind_tracts[sample_copy]) / total_length
-                replicate_props.append(np.mean([prop, prop_copy]))
+                replicate_props.append(prop)
 
             ancestry_props.append(replicate_props)
             pbar.update(1)
@@ -88,9 +88,9 @@ def simulate(args, admixture_time):
             132349534, 114142980, 106368585, 100338915, 88827254, 78774742,
             76117153, 63811651, 62435964, 46944323, 49691432]
     chrom_lengths = all_lengths[:args.num_chroms]
-    num_loci = chrom_lengths[-1] + 1
 
     positions, rates = get_positions_rates(chrom_lengths, rho)
+    num_loci = positions[-1] + 1
     recombination_map = msprime.RecombinationMap(
             positions, rates, num_loci=num_loci)
 
@@ -194,7 +194,7 @@ if __name__ == "__main__":
     parser.add_argument('--admixture_prop', type=float, default=0.3)
     parser.add_argument('--num_chroms', type=int, default=22)
     parser.add_argument('--replicates', type=int, default=1)
-    parser.add_argument('--out_dir', default='../results/ancestry_variance/')
+    parser.add_argument('--out_dir', default=os.path.expanduser('~/temp/'))
 
     args = parser.parse_args()
     main(args)
