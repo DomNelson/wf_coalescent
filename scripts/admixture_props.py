@@ -90,7 +90,7 @@ def simulate(args, admixture_time):
     chrom_lengths = all_lengths[:args.num_chroms]
 
     positions, rates = get_positions_rates(chrom_lengths, rho)
-    num_loci = positions[-1] + 1
+    num_loci = positions[-1]
     recombination_map = msprime.RecombinationMap(
             positions, rates, num_loci=num_loci)
 
@@ -149,8 +149,27 @@ def get_output_suffix(args, admixture_time):
 
 
 def main(args):
-    admixture_range = [int(x.strip()) for x in args.admixture_range.split(',')]
-    admixture_times = range(*admixture_range)
+    if args.paper_params:
+        print("Reproducing figure from paper - ignoring all other args" +\
+                " except --model and --out_dir")
+        admixture_times = [x for x in range(1, 20)]
+        admixture_times += [x for x in range(20, 50, 2)]
+        admixture_times += [x for x in range(50, 100, 5)]
+        admixture_times += [x for x in range(100, 200, 10)]
+        admixture_times += [x for x in range(200, 500, 25)]
+
+        paper_args = argparse.Namespace(
+                Ne=1000,
+                sample_size=80,
+                model=args.model,
+                admixture_prop=0.3,
+                num_chroms=22,
+                replicates=1,
+                out_dir=args.out_dir
+                )
+    else:
+        admixture_range = [int(x.strip()) for x in args.admixture_range.split(',')]
+        admixture_times = range(*admixture_range)
     
     nrows = len(admixture_times)
     ncols = args.replicates
@@ -178,15 +197,16 @@ def main(args):
     suffix = get_output_suffix(args, admixture_time=t)
     average_variance.to_csv(os.path.join(basedir, suffix + '.txt'))
 
-    fig, ax = plt.subplots()
-    average_variance.plot(ax=ax, logx=True, logy=True)
-    plot_file = os.path.join(basedir, suffix + '.png')
-    fig.savefig(plot_file)
+    # fig, ax = plt.subplots()
+    # average_variance.plot(ax=ax, logx=True, logy=True)
+    # plot_file = os.path.join(basedir, suffix + '.png')
+    # fig.savefig(plot_file)
     # import IPython; IPython.embed()
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+    parser.add_argument("--paper_params", action='store_true')
     parser.add_argument("--Ne", type=int, default=80)
     parser.add_argument("--sample_size", type=int, default=80)
     parser.add_argument('--model', default='Hudson')
