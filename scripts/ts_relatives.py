@@ -21,6 +21,25 @@ from tqdm import tqdm
 from sortedcontainers import sortedlist
 import gc
 import weakref
+# from profilehooks import profile
+
+
+def get_positions_rates(chrom_lengths, rho):
+    """
+    Takes a list of chromosome lengths and returns lists of positions and
+    rates to pass to msprime.RecombinationMap
+    """
+    positions = []
+    rates = []
+    total_length = 0
+    for length in chrom_lengths:
+        positions.extend([int(total_length), int(total_length) + int(length) - 1])
+        rates.extend([rho, 0.5])
+        total_length += length
+
+    rates[-1] = 0
+
+    return positions, rates
 
 
 class TSRelatives:
@@ -70,39 +89,8 @@ class TSRelatives:
         return out_candidates
             
             
-    def get_node_diff(self, diff_out, diff_in):
-        out_candidates = self.get_node_diff_candidates(diff_out)        
-        in_candidates = self.get_node_diff_candidates(diff_in)
-        
-        if len(in_candidates) > 1:
-            out_inds = []
-            for edge_out in diff_out:
-                out_inds.extend([edge_out.parent, edge_out.child])
-            in_candidates = [c for c in in_candidates if c not in out_inds]
-        
-        assert(len(in_candidates) == 1)
-        in_node = in_candidates[0]
-        
-        if len(out_candidates) > 1:
-            in_parents = [edge.parent for edge in diff_in]
-            out_candidates = [c for c in out_candidates if c not in in_parents]
-        
-        assert(len(out_candidates) == 1)
-        out_node = out_candidates[0]
-        
-        return out_node, in_node
-    
-    
-#     def get_new_lineage(self, diff_out, diff_in):
-#         """
-#         Returns new lineage as tuple (start_time, end_time). Ambiguous start times
-#         average over possible values.
-#         """
-#         out_node, in_node = self.get_node_diff(diff_out, diff_in)
-            
     def get_first_ancestor_below_max_time(self, tree, node):
         if self.node_times[node] > self.max_time:
-            print(-1)
             return -1
         
         parent = tree.get_parent(node)
@@ -112,7 +100,7 @@ class TSRelatives:
                 break
             node = parent
             parent = tree.get_parent(node)
-        
+
         assert self.node_times[node] <= self.max_time
         return node
 
@@ -134,9 +122,6 @@ class TSRelatives:
         for node in nodes:
             samples.update(tree.get_leaves(node))
             
-        print(tree.draw(format='unicode'))
-        print("Updating:", samples)
-            
         return list(samples)
     
     
@@ -146,6 +131,7 @@ class TSRelatives:
         for a, b in combinations(nodes_in_diff, 2):
             if a == b:
                 continue
+            a, b = sorted([a, b])
             ca = tree.get_mrca(a, b)
             ca_time = self.node_times[ca]
             if ca_time > self.max_time:
@@ -161,7 +147,7 @@ class TSRelatives:
                 ## Here we've found a second common ancestor from the same
                 ## generation as the first
                 self.ca_count[a, b] = 2
-                
+
                 
     def get_all_min_common_ancestor_times(self):
         with tqdm(total=self.ts.num_trees) as pbar:
@@ -197,14 +183,15 @@ class TSRelatives:
             
             
     def get_children_of_edges_crossing_max_time(self, locus=None):
-        children = []
+        children = set()
         for edge in self.ts.edges():
-            if locus is not None and (edge.left <= locus and edge.right > locus):
+            if locus is not None and (edge.left > locus or edge.right <= locus):
                 continue
             parent_time = self.node_times[edge.parent]
             child_time = self.node_times[edge.child]
             if parent_time > self.max_time and child_time <= self.max_time:
-                children.append(edge.child)
+                # print("Adding", edge)
+                children.add(edge.child)
                 
         return children
     
@@ -222,20 +209,23 @@ class TSRelatives:
         for a in ancs:
             clusters[a] = set(first_tree.get_leaves(a))
 
-        print("Initial clusters:", clusters)
-        
+        # print("Initial clusters:", clusters)
+
         return clusters
-            
-            
+
+
+    # @profile
     def update_clusters(self, tree, diff, clusters):
         new_clusters = defaultdict(set)
         changed_samples = self.get_samples_below_edge_diff(tree, diff)
-#         segment, diff_in, diff_out = diff
-#         out_node, in_node = self.get_node_diff(diff_out, diff_in)
+        # print("Changed samples:", len(changed_samples))
+        # print("Num clusters:", len(clusters))
         
         ## First remove changed samples from existing clusters and update
         ## oldest anc if necessary
         for anc, cluster in clusters.items():
+            if len(cluster) == 0:
+                continue
             new_anc = self.get_first_ancestor_below_max_time(tree, anc)
             new_clusters[new_anc].update(cluster.difference(changed_samples))
             
@@ -245,12 +235,9 @@ class TSRelatives:
             new_clusters[anc].add(sample)
             
         ## Sanity check - no clusters should share samples
-        for c1, c2 in combinations(new_clusters.values(), 2):
-            assert len(c1.intersection(c2)) == 0
+        # for c1, c2 in combinations(new_clusters.values(), 2):
+        #     assert len(c1.intersection(c2)) == 0
 
-        print(clusters)
-        print(new_clusters)
-            
         return new_clusters
         
                 
@@ -275,9 +262,10 @@ class TSRelatives:
         ## IBD starting at 0 is denoted by index 1.
         with tqdm(total=self.ts.num_trees, desc="Writing IBD pairs") as pbar:
             for i, (tree, diff) in enumerate(zip(trees, diffs)):
-#                 print(i)
+                # if i == 1000:
+                #     print("Num clusters:", len(clusters))
+                #     sys.exit()
                 for cluster in clusters.values():
-#                     print(cluster)
                     ibd_pairs = combinations(sorted(cluster), 2)
                     for pair in ibd_pairs:
                         ## Check if we are starting a new IBD segment
@@ -294,9 +282,7 @@ class TSRelatives:
         
         ## TODO: Add last tree - integrate into main loop above
             i += 1
-            print(i)
             for cluster in clusters.values():
-                print(cluster)
                 ibd_pairs = combinations(sorted(cluster), 2)
                 for pair in ibd_pairs:
                     ## Check if we are starting a new IBD segment
@@ -314,7 +300,63 @@ class TSRelatives:
         ## Write out all remaining segments, which reached the end of the
         ## simulated region
         self.write_ibd_all(ibd_start, ibd_end)
-        
+
+
+def plot_ibd(ibd_list, ca_times=None, min_length=0, out_file=None):
+    print("Plotting!")
+    fig, ax = plt.subplots()
+    if out_file is None:
+        out_file = os.path.expanduser('~/temp/ibd_plot.png')
+	
+    cols = ["ind1", "ind2", "start", "end"]
+
+    ibd_df = pd.DataFrame(ibd_list, columns=cols)
+    ibd_df['len'] = ibd_df['end'] - ibd_df['start']
+    ibd_df = ibd_df[ibd_df['len'] >= min_length]
+    
+    ibd_df['count'] = 1
+    inds = set(ibd_df['ind1'].values)
+    for ind in inds:
+        # print(ind)
+        # print(len(inds))
+        ind_df = ibd_df[ibd_df['ind1'] == ind]
+        ind_pairwise_ibd_df = ind_df.groupby('ind2').sum()
+        ind_pairwise_ibd_df = ind_pairwise_ibd_df.reset_index()
+
+        total_IBD = ind_pairwise_ibd_df['len'].values
+        num_segments = ind_pairwise_ibd_df['count'].values
+        ind2 = ind_pairwise_ibd_df['ind2'].values
+        sizes = np.ones(total_IBD.shape[0]) * 8
+        # print(len(sizes))
+        # print(total_IBD.shape)
+
+        colours = None
+        cmap = None
+        if ca_times is not None:
+            colours = []
+            for i in range(len(ind2)):
+                x, y = sorted([ind, ind2[i]])
+                assert(x <= y)
+                colours.append(ca_times[x, y])
+                if colours[-1] == 0:
+                    print(x, y)
+
+            colours = np.array(colours)
+            cmap = 'viridis'
+
+        # print("Plotting")
+        ax.scatter(total_IBD, num_segments, s=sizes, c=colours, cmap=cmap)
+        # print("Break!")
+        # break
+
+    ax.set_ylabel('Number of IBD segments')
+    ax.set_xlabel('Total IBD')
+    ax.set_xscale('log')
+    print("Saving...")
+    fig.savefig(out_file)
+    print("Done!")
+
+
 def ibd_list_to_df(ibd_list, ca_times=None):
     cols = ["ind1", "ind2", "start", "end"]
 
@@ -331,25 +373,27 @@ def ibd_list_to_df(ibd_list, ca_times=None):
     
 
 def simulate():
-    recmap = msprime.RecombinationMap(
-	positions=[0, 10],
-	rates=[0.01, 0],
-	num_loci = 10
+    rho = 1e-8
+    chrom_lengths = [247249719, 242951149, 199501827, 191273063, 180857866,
+            170899992, 158821424, 146274826, 140273252, 135374737, 134452384,
+            132349534, 114142980, 106368585, 100338915, 88827254, 78774742,
+            76117153, 63811651, 62435964, 46944323, 49691432]
+    num_loci = chrom_lengths[-1] + 1
+
+    positions, rates = get_positions_rates(chrom_lengths, rho)
+    recombination_map = msprime.RecombinationMap(
+            positions, rates, num_loci=num_loci
     )
     population_configuration = msprime.PopulationConfiguration(
-	sample_size=5,
-	initial_size=10
+	sample_size=50,
+	initial_size=50
     )
 
     ts = msprime.simulate(
             population_configurations=[population_configuration],
             model='dtwf',
-            recombination_map=recmap
+            recombination_map=recombination_map
             )
-
-    # ts_file = '/Users/dnelson/temp/ts_dump.h5'
-    # ts.dump(ts_file)
-    # ts = msprime.load(ts_file)
 
     return ts
 
@@ -372,5 +416,25 @@ def run_tsr(ts, max_time=10):
     tsr.get_ibd()
 
     return tsr
+
+# ts_file = '/home/dnelson/project/wf_coalescent/results/IBD/Ne500_samples500_WG_ts_dtwf.h5'
+# ibd_file = '/home/dnelson/project/wf_coalescent/results/IBD/Ne500_samples500_WG_dtwf.npz'
+# loaded = np.load(ibd_file)
+# ibd_array = loaded['ibd_array']
+# ts = msprime.load(ts_file)
+
+if __name__ == "__main__":
+    ts = simulate()
+
+    tsr = TSRelatives(5, ts)
+    tsr.get_ibd()
+    tsr.get_all_min_common_ancestor_times()
+
+    try:
+        plot_ibd(tsr.ibd_list, tsr.ca_times, min_length=1e6)
+    except:
+        print("Error!")
+        import IPython; IPython.embed()
+    import IPython; IPython.embed()
 
 
