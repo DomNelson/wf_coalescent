@@ -158,19 +158,19 @@ def main(args):
 
     if args.paper_params:
         print("*" * 79)
-        print("Reproducing figure from paper - ignoring all other args" +\
-                " except --model and --out_dir")
+        print("Reproducing figure from paper - ignoring all args" +\
+                " except --out_dir")
         print("*" * 79)
         admixture_times = [x for x in range(1, 20)]
-        # admixture_times += [x for x in range(20, 50, 5)]
-        # admixture_times += [x for x in range(50, 100, 10)]
-        # admixture_times += [x for x in range(100, 200, 10)]
-        # admixture_times += [x for x in range(200, 500, 25)]
+        admixture_times += [x for x in range(20, 50, 5)]
+        admixture_times += [x for x in range(50, 100, 10)]
+        admixture_times += [x for x in range(100, 200, 10)]
+        admixture_times += [x for x in range(200, 500, 25)]
 
         args = argparse.Namespace(
                 Ne=80,
                 sample_size=80,
-                model=args.model,
+                model=None,
                 admixture_prop=0.3,
                 num_chroms=22,
                 replicates=5,
@@ -182,6 +182,10 @@ def main(args):
         admixture_range = [int(x.strip()) for x in args.admixture_range.split(',')]
         admixture_times = range(*admixture_range)
 
+    if args.model is None:
+        models = ['dtwf', 'hudson']
+    else:
+        models = [x.strip() for x in args.model.split(',')]
 
     rho = 1e-8
     all_lengths_morgans = [2.77693825, 2.633496065, 2.24483368, 2.12778391, 
@@ -209,6 +213,9 @@ def main(args):
     ncols = args.replicates
     variance_array = np.zeros([nrows, ncols])
 
+    basedir, ext = os.path.splitext(args.out_dir)
+    suffix = get_output_suffix(args, admixture_time=t)
+
     var_df = pd.DataFrame(index=admixture_times)
     for model in ['dtwf', 'hudson']:
         args.model = model
@@ -228,6 +235,7 @@ def main(args):
                 index=admixture_times)
         average_variance = model_df.mean(axis=1)
         var_df[model] = average_variance
+        var_df.to_csv(os.path.join(basedir, suffix + '.txt'))
 
     length_in_morgans = positions[-1] / 1e8
     haploid_gravel_variance = [
@@ -240,15 +248,11 @@ def main(args):
             ) for T in admixture_times]
     print("Comparing vs tracts with", length_in_morgans, "Morgans")
     var_df['Expected (haploid)'] = haploid_gravel_variance
-
-    basedir, ext = os.path.splitext(args.out_dir)
-    suffix = get_output_suffix(args, admixture_time=t)
     var_df.to_csv(os.path.join(basedir, suffix + '.txt'))
 
     if args.plot:
         plot_file = os.path.join(basedir, suffix + '.png')
         fig, ax = plt.subplots()
-
         var_df.plot(ax=ax)
         ax.set_xscale('log')
         ax.set_yscale('log')
@@ -260,7 +264,7 @@ if __name__ == "__main__":
     parser.add_argument("--paper_params", action='store_true')
     parser.add_argument("--Ne", type=int, default=80)
     parser.add_argument("--sample_size", type=int, default=80)
-    parser.add_argument('--model', default='Hudson')
+    parser.add_argument('--model', default=None)
     parser.add_argument('--admixture_range', default="1,10")
     parser.add_argument('--admixture_prop', type=float, default=0.3)
     parser.add_argument('--num_chroms', type=int, default=22)
