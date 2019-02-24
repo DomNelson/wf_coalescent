@@ -13,7 +13,7 @@ import pandas as pd
 from tqdm import tqdm
 
 
-def gravel_ancestry_variance(T, m, L, K, N):
+def haploid_gravel_ancestry_variance(T, m, L, K, N):
     """
     T - admixture time
     m - migration rate
@@ -23,7 +23,7 @@ def gravel_ancestry_variance(T, m, L, K, N):
     """
     A = m * (1 - m) / 2 ** (T - 1)
     B_num = 2 * m * (1 - m) * (1 - 1 / (2 * N)) ** (T - 1)
-    B_denom = 2 * K + 2 * (T - 2) * L
+    B_denom = 1 * (K + 1 * (T - 2) * L)
     B = B_num / B_denom
     
     return A + B
@@ -53,28 +53,24 @@ def get_ind_tracts(ts, max_time):
     key = lambda x: x.left
     migrations = sorted(ts.migrations(), key=key)
     trees = ts.trees()
+    t = next(trees)
     
     for migration in migrations:
         if migration.time > max_time:
             continue
             
-        stored = False
         node = migration.node
         length = migration.right - migration.left
 
-        while not stored:
+        while t.interval[1] <= migration.left:
             t = next(trees)
-            try:
-                samples = t.get_leaves(node)
-            except ValueError:
-                continue
-                
-            for s in samples:
-                ind_tracts[s].append(length)
-            stored = True
 
-    # import IPython; IPython.embed()
-                
+        assert t.interval[0] <= migration.left and t.interval[1] > migration.left
+
+        samples = t.get_leaves(node)
+        for s in samples:
+            ind_tracts[s].append(length)
+
     return ind_tracts
 
 
@@ -83,17 +79,16 @@ def get_ancestry_props(replicates, max_time, num_replicates):
 
     with tqdm(total=num_replicates, desc=str(max_time)) as pbar:
         for ts in replicates:
-            # from IPython import embed; embed()
-            # sys.exit()
             ind_tracts = get_ind_tracts(ts, max_time)
             total_length = ts.get_sequence_length()
 
             replicate_props = []
+
             samples = iter(ts.samples())
             for sample in samples:
-                sample_copy = next(samples)
-                ## Convert to Morgans
-                prop = sum(ind_tracts[sample]) / total_length
+                sample = next(samples)
+                prop = sum(ind_tracts[sample])
+                prop = prop / total_length
                 replicate_props.append(prop)
 
             ancestry_props.append(replicate_props)
@@ -114,12 +109,6 @@ def simulate(args, recombination_map, admixture_time):
                     initial_size=args.Ne
             )
     ]
-
-    migration_matrix = None
-    # [
-    #     [0, args.admixture_prop],
-    #     [0,       0],
-    # ]
 
     demographic_events = [
         msprime.MassMigration(
@@ -145,7 +134,6 @@ def simulate(args, recombination_map, admixture_time):
     replicates = msprime.simulate(
             recombination_map=recombination_map,
             demographic_events=demographic_events,
-            migration_matrix=migration_matrix,
             population_configurations=population_configurations,
             model=args.model,
             record_migrations=True,
@@ -173,20 +161,19 @@ def main(args):
         print("Reproducing figure from paper - ignoring all other args" +\
                 " except --model and --out_dir")
         print("*" * 79)
-        admixture_times = [x for x in [1, 2]]
-        # admixture_times = [x for x in range(1, 20)]
-        # admixture_times += [x for x in range(20, 50, 4)]
+        admixture_times = [x for x in range(1, 20)]
+        # admixture_times += [x for x in range(20, 50, 5)]
         # admixture_times += [x for x in range(50, 100, 10)]
         # admixture_times += [x for x in range(100, 200, 10)]
         # admixture_times += [x for x in range(200, 500, 25)]
 
         args = argparse.Namespace(
-                Ne=100,
-                sample_size=100,
+                Ne=80,
+                sample_size=80,
                 model=args.model,
                 admixture_prop=0.3,
                 num_chroms=22,
-                replicates=50,
+                replicates=5,
                 out_dir=args.out_dir,
                 discretize_hack=True,
                 plot=True,
@@ -197,10 +184,12 @@ def main(args):
 
 
     rho = 1e-8
-    all_lengths = [247249719, 242951149, 199501827, 191273063, 180857866,
-            170899992, 158821424, 146274826, 140273252, 135374737, 134452384,
-            132349534, 114142980, 106368585, 100338915, 88827254, 78774742,
-            76117153, 63811651, 62435964, 46944323, 49691432]
+    all_lengths_morgans = [2.77693825, 2.633496065, 2.24483368, 2.12778391, 
+            2.03765845, 1.929517394, 1.867959329, 1.701765192, 1.68073935, 
+            1.789473882, 1.594854258, 1.72777271, 1.26940475, 1.16331251, 
+            1.2554709, 1.348911043, 1.29292106, 1.18978483, 1.077960694, 
+            1.079243479, 0.61526812, 0.72706815]
+    all_lengths = [x * 1e8 for x in all_lengths_morgans]
     chrom_lengths = all_lengths[:args.num_chroms]
 
     positions, rates = get_positions_rates(chrom_lengths, rho)
@@ -219,50 +208,50 @@ def main(args):
     nrows = len(admixture_times)
     ncols = args.replicates
     variance_array = np.zeros([nrows, ncols])
-    bins = np.arange(0, 1.1, 0.1)
 
-    df = pd.DataFrame()
-    for i, t in enumerate(admixture_times):
-        replicates = simulate(args, recombination_map, admixture_time=t)
-        props_replicates = get_ancestry_props(
-                replicates,
-                max_time=t,
-                num_replicates=args.replicates)
+    var_df = pd.DataFrame(index=admixture_times)
+    for model in ['dtwf', 'hudson']:
+        args.model = model
+        for i, t in enumerate(admixture_times):
+            replicates = simulate(args, recombination_map, admixture_time=t)
+            props_replicates = get_ancestry_props(
+                    replicates,
+                    max_time=t,
+                    num_replicates=args.replicates)
 
-        for j, props in enumerate(props_replicates):
-            variance_array[i, j] = np.var(props)
+            for j, props in enumerate(props_replicates):
+                variance_array[i, j] = np.var(props) / (1 - 1 / len(props))
 
-    df = pd.DataFrame(
-            variance_array,
-            columns=range(args.replicates),
-            index=admixture_times)
-    average_variance = df.mean(axis=1)
+        model_df = pd.DataFrame(
+                variance_array,
+                columns=range(args.replicates),
+                index=admixture_times)
+        average_variance = model_df.mean(axis=1)
+        var_df[model] = average_variance
+
+    length_in_morgans = positions[-1] / 1e8
+    haploid_gravel_variance = [
+            haploid_gravel_ancestry_variance(
+                    T,
+                    args.admixture_prop,
+                    length_in_morgans,
+                    args.num_chroms,
+                    args.Ne
+            ) for T in admixture_times]
+    print("Comparing vs tracts with", length_in_morgans, "Morgans")
+    var_df['Expected (haploid)'] = haploid_gravel_variance
 
     basedir, ext = os.path.splitext(args.out_dir)
     suffix = get_output_suffix(args, admixture_time=t)
-    average_variance.to_csv(os.path.join(basedir, suffix + '.txt'))
+    var_df.to_csv(os.path.join(basedir, suffix + '.txt'))
 
     if args.plot:
-
-        length_in_morgans = positions[-1] / 1e8
-        gravel_variance = [
-                gravel_ancestry_variance(
-                        T,
-                        args.admixture_prop,
-                        length_in_morgans,
-                        args.num_chroms,
-                        args.Ne
-                ) for T in admixture_times]
-        print("Comparing vs tracts with", length_in_morgans, "Morgans")
-
         plot_file = os.path.join(basedir, suffix + '.png')
-
         fig, ax = plt.subplots()
-        ax.plot(admixture_times, gravel_variance, label='Expected')
-        average_variance.plot(ax=ax, label=str(args.model))
+
+        var_df.plot(ax=ax)
         ax.set_xscale('log')
         ax.set_yscale('log')
-        fig.legend()
         fig.savefig(plot_file)
 
 
