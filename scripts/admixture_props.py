@@ -169,7 +169,6 @@ def simulate(args, model, recombination_map, admixture_time):
 def get_output_suffix(args, admixture_time):
     suffix = 'ancestry_variance'
     suffix += 'Ne' + '_' + str(args.Ne) + '_'
-    suffix += 'model' + '_' + str(args.model) + '_'
     suffix += 'admix_time' + '_' + str(admixture_time) + '_'
     suffix += 'admix_prop' + '_' + str(args.admixture_prop) + '_'
     suffix += 'nchroms' + '_' + str(args.num_chroms)
@@ -182,17 +181,16 @@ def set_paper_params(args):
     print("Reproducing figure from paper - ignoring all args" +\
             " except --out_dir")
     print("*" * 79)
-    admixture_times = [x for x in range(1, 5)]
-    # admixture_times = [x for x in range(1, 20)]
-    # admixture_times += [x for x in range(20, 50, 5)]
-    # admixture_times += [x for x in range(50, 100, 10)]
-    # admixture_times += [x for x in range(100, 200, 10)]
-    # admixture_times += [x for x in range(200, 500, 25)]
+    # admixture_times = [x for x in range(1, 5)]
+    admixture_times = [x for x in range(1, 20)]
+    admixture_times += [x for x in range(20, 50, 5)]
+    admixture_times += [x for x in range(50, 100, 10)]
+    admixture_times += [x for x in range(100, 200, 10)]
+    admixture_times += [x for x in range(200, 525, 25)]
 
     paper_args = argparse.Namespace(
             Ne=80,
             sample_size=80,
-            model=None,
             dtwf_file=args.dtwf_file,
             hudson_file=args.hudson_file,
             admixture_prop=0.3,
@@ -243,7 +241,6 @@ def get_mean_variance_with_CIs(model_df, CI_interval=0.95):
 
     low_CI = 0.5 - (CI_interval / 2)
     high_CI = 0.5 + (CI_interval / 2)
-    print(low_CI, high_CI)
 
     ## Long-winded but other methods don't seem to allow specifying
     ## percentiles
@@ -280,11 +277,6 @@ def main(args):
         admixture_range = [int(x.strip()) for x in args.admixture_range.split(',')]
         admixture_times = range(*admixture_range)
 
-    if args.model is None:
-        models = ['dtwf', 'hudson']
-    else:
-        models = [x.strip() for x in args.model.split(',')]
-
     prefix = get_output_prefix(args.out_dir, admixture_times)
 
     positions, rates, num_loci = get_whole_genome_positions_rates_loci(args)
@@ -296,6 +288,7 @@ def main(args):
     ## DTWF variance
     if args.dtwf_file is not None:
         df = pd.read_csv(args.dtwf_file, index_col=0)
+        dtwf_times = list(df.index)
     else:
         df = get_simulation_variance(args, 'dtwf', admixture_times, rec_map)
         df.to_csv(prefix + '_replicates_dtwf.txt')
@@ -308,6 +301,12 @@ def main(args):
     ## Hudson variance
     if args.hudson_file is not None:
         df = pd.read_csv(args.hudson_file, index_col=0)
+        hudson_times = list(df.index)
+
+        ## To help compare to the proper theory curve
+        ## TODO: Check other args as well
+        assert(hudson_times == dtwf_times)
+        admixture_times = hudson_times
     else:
         df = get_simulation_variance(args, 'hudson', admixture_times, rec_map)
         df.to_csv(prefix + '_replicates_hudson.txt')
@@ -315,7 +314,6 @@ def main(args):
     CI_df = get_mean_variance_with_CIs(df, CI_interval=args.CI_width)
     errs = format_CIs_for_plot(CI_df)
     dfs['hudson'] = [CI_df, errs]
-
 
     ## Tracts expected variance
     length_in_morgans = positions[-1] / 1e8
@@ -338,8 +336,6 @@ def main(args):
         fig, ax = plt.subplots()
 
         for model, (CI_df, errs) in dfs.items():
-            print(CI_df['mean'])
-            print(errs)
             CI_df['mean'].plot(ax=ax, yerr=errs, capsize=2, fmt='.', legend=False,
                     label=model)
         expected_df.plot(ax=ax, legend=False)
@@ -355,7 +351,6 @@ if __name__ == "__main__":
     parser.add_argument("--paper_params", action='store_true')
     parser.add_argument("--Ne", type=int, default=80)
     parser.add_argument("--sample_size", type=int, default=80)
-    parser.add_argument('--model', default=None)
     parser.add_argument('--dtwf_file', default=None)
     parser.add_argument('--hudson_file', default=None)
     parser.add_argument('--admixture_range', default="1,10")
