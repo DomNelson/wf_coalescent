@@ -4,8 +4,8 @@ sys.path.append('../../msprime/lib/subprojects/git-submodules/tskit/python')
 import msprime
 import collections
 import numpy as np
-import matplotlib
-matplotlib.use('Agg')
+import matplotlib as mpl
+mpl.use('Agg')
 import matplotlib.pyplot as plt
 import seaborn as sns
 import argparse
@@ -45,6 +45,29 @@ def get_positions_rates(chrom_lengths, rho):
     rates[-1] = 0
 
     return positions, rates
+
+
+def get_whole_genome_positions_rates_loci(args, rho=1e-8):
+    all_lengths_morgans = [2.77693825, 2.633496065, 2.24483368, 2.12778391, 
+            2.03765845, 1.929517394, 1.867959329, 1.701765192, 1.68073935, 
+            1.789473882, 1.594854258, 1.72777271, 1.26940475, 1.16331251, 
+            1.2554709, 1.348911043, 1.29292106, 1.18978483, 1.077960694, 
+            1.079243479, 0.61526812, 0.72706815]
+    all_lengths = [x * 1e8 for x in all_lengths_morgans]
+
+    chrom_lengths = all_lengths[:args.num_chroms]
+
+    positions, rates = get_positions_rates(chrom_lengths, rho)
+    num_loci = positions[-1]
+
+    ## HACK: This is to avoid bad edge intervals (right <= left) when
+    ## simulating whole genomes. Possible overflow / floating point precision
+    ## issue
+    if args.discretize_hack:
+        num_loci = int(num_loci / 100)
+        print("Scaling to", num_loci, "loci")
+
+    return positions, rates, num_loci
 
 
 def get_ind_tracts(ts, max_time):
@@ -154,69 +177,48 @@ def get_output_suffix(args, admixture_time):
     return suffix
 
 
-def main(args):
+def set_paper_params(args):
+    print("*" * 79)
+    print("Reproducing figure from paper - ignoring all args" +\
+            " except --out_dir")
+    print("*" * 79)
+    # admixture_times = [x for x in range(1, 5)]
+    admixture_times = [x for x in range(1, 20)]
+    admixture_times += [x for x in range(20, 50, 5)]
+    admixture_times += [x for x in range(50, 100, 10)]
+    admixture_times += [x for x in range(100, 200, 10)]
+    admixture_times += [x for x in range(200, 500, 25)]
 
-    if args.paper_params:
-        print("*" * 79)
-        print("Reproducing figure from paper - ignoring all args" +\
-                " except --out_dir")
-        print("*" * 79)
-        admixture_times = [x for x in range(1, 20)]
-        admixture_times += [x for x in range(20, 50, 5)]
-        admixture_times += [x for x in range(50, 100, 10)]
-        admixture_times += [x for x in range(100, 200, 10)]
-        admixture_times += [x for x in range(200, 500, 25)]
+    paper_args = argparse.Namespace(
+            Ne=80,
+            sample_size=80,
+            model=None,
+            admixture_prop=0.3,
+            num_chroms=22,
+            replicates=3,
+            out_dir=args.out_dir,
+            discretize_hack=True,
+            plot=True,
+            )
 
-        args = argparse.Namespace(
-                Ne=80,
-                sample_size=80,
-                model=None,
-                admixture_prop=0.3,
-                num_chroms=22,
-                replicates=5,
-                out_dir=args.out_dir,
-                discretize_hack=True,
-                plot=True,
-                )
-    else:
-        admixture_range = [int(x.strip()) for x in args.admixture_range.split(',')]
-        admixture_times = range(*admixture_range)
+    return paper_args, admixture_times
 
-    if args.model is None:
-        models = ['dtwf', 'hudson']
-    else:
-        models = [x.strip() for x in args.model.split(',')]
 
-    rho = 1e-8
-    all_lengths_morgans = [2.77693825, 2.633496065, 2.24483368, 2.12778391, 
-            2.03765845, 1.929517394, 1.867959329, 1.701765192, 1.68073935, 
-            1.789473882, 1.594854258, 1.72777271, 1.26940475, 1.16331251, 
-            1.2554709, 1.348911043, 1.29292106, 1.18978483, 1.077960694, 
-            1.079243479, 0.61526812, 0.72706815]
-    all_lengths = [x * 1e8 for x in all_lengths_morgans]
-    chrom_lengths = all_lengths[:args.num_chroms]
+def get_output_prefix(out_dir, admixture_times):
+    basedir, ext = os.path.splitext(args.out_dir)
+    suffix = get_output_suffix(args, admixture_time=admixture_times[-1])
 
-    positions, rates = get_positions_rates(chrom_lengths, rho)
-    num_loci = positions[-1]
+    return os.path.join(basedir, suffix)
 
-    ## HACK: This is to avoid bad edge intervals (right <= left) when
-    ## simulating whole genomes. Possible overflow / floating point precision
-    ## issue
-    if args.discretize_hack:
-        num_loci = int(num_loci / 100)
-        print("Scaling to", num_loci, "loci")
 
-    recombination_map = msprime.RecombinationMap(
-            positions, rates, num_loci=num_loci)
-    
+def get_simulation_variance(args, admixture_times, recombination_map):
     nrows = len(admixture_times)
     ncols = args.replicates
     variance_array = np.zeros([nrows, ncols])
-
-    basedir, ext = os.path.splitext(args.out_dir)
-    suffix = get_output_suffix(args, admixture_time=t)
+    prefix = get_output_prefix(args.out_dir, admixture_times)
 
     var_df = pd.DataFrame(index=admixture_times)
+    CIs = []
     for model in ['dtwf', 'hudson']:
         args.model = model
         for i, t in enumerate(admixture_times):
@@ -235,8 +237,39 @@ def main(args):
                 index=admixture_times)
         average_variance = model_df.mean(axis=1)
         var_df[model] = average_variance
-        var_df.to_csv(os.path.join(basedir, suffix + '.txt'))
+        var_df.to_csv(prefix + '.txt')
 
+        ## Long-winded but other methods don't seem to allow specifying
+        ## percentiles
+        # model_CI = model_df.transpose().describe([0.025, 0.975]).transpose()
+        # CIs.append(model_CI[['2.5%', '97.5%']].transpose().values)
+        model_CI = model_df.transpose().describe([0.165, 0.835]).transpose()
+        CIs.append(model_CI[['16.5%', '83.5%']].transpose().values)
+
+    errs = np.stack(CIs, axis=1)
+
+    return var_df, errs
+
+
+def main(args):
+    if args.paper_params:
+        args, admixture_times = set_paper_params(args)
+    else:
+        admixture_range = [int(x.strip()) for x in args.admixture_range.split(',')]
+        admixture_times = range(*admixture_range)
+
+    if args.model is None:
+        models = ['dtwf', 'hudson']
+    else:
+        models = [x.strip() for x in args.model.split(',')]
+
+    positions, rates, num_loci = get_whole_genome_positions_rates_loci(args)
+    rec_map = msprime.RecombinationMap(
+            positions, rates, num_loci=num_loci)
+
+    var_df, errs = get_simulation_variance(args, admixture_times, rec_map)
+
+    prefix = get_output_prefix(args.out_dir, admixture_times)
     length_in_morgans = positions[-1] / 1e8
     haploid_gravel_variance = [
             haploid_gravel_ancestry_variance(
@@ -248,14 +281,21 @@ def main(args):
             ) for T in admixture_times]
     print("Comparing vs tracts with", length_in_morgans, "Morgans")
     var_df['Expected (haploid)'] = haploid_gravel_variance
-    var_df.to_csv(os.path.join(basedir, suffix + '.txt'))
+    var_df.to_csv(prefix + '.txt')
 
     if args.plot:
-        plot_file = os.path.join(basedir, suffix + '.png')
+        sns.set_palette("muted", 8)
+        plot_file = prefix + '.png'
+
         fig, ax = plt.subplots()
-        var_df.plot(ax=ax)
+
+        sim_var_df = var_df.drop(columns='Expected (haploid)')
+        sim_var_df.plot(ax=ax, yerr=errs, capsize=2, fmt='o', legend=False)
+        var_df['Expected (haploid)'].plot(ax=ax, legend=False)
+
         ax.set_xscale('log')
         ax.set_yscale('log')
+        fig.legend()
         fig.savefig(plot_file)
 
 
