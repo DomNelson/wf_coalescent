@@ -120,7 +120,7 @@ def get_ancestry_props(replicates, max_time, num_replicates):
     return ancestry_props
 
 
-def simulate(args, recombination_map, admixture_time):
+def simulate(args, model, recombination_map, admixture_time):
 
     population_configurations = [
             msprime.PopulationConfiguration(
@@ -158,7 +158,7 @@ def simulate(args, recombination_map, admixture_time):
             recombination_map=recombination_map,
             demographic_events=demographic_events,
             population_configurations=population_configurations,
-            model=args.model,
+            model=model,
             record_migrations=True,
             num_replicates=args.replicates
     )
@@ -182,20 +182,23 @@ def set_paper_params(args):
     print("Reproducing figure from paper - ignoring all args" +\
             " except --out_dir")
     print("*" * 79)
-    # admixture_times = [x for x in range(1, 5)]
-    admixture_times = [x for x in range(1, 20)]
-    admixture_times += [x for x in range(20, 50, 5)]
-    admixture_times += [x for x in range(50, 100, 10)]
-    admixture_times += [x for x in range(100, 200, 10)]
-    admixture_times += [x for x in range(200, 500, 25)]
+    admixture_times = [x for x in range(1, 5)]
+    # admixture_times = [x for x in range(1, 20)]
+    # admixture_times += [x for x in range(20, 50, 5)]
+    # admixture_times += [x for x in range(50, 100, 10)]
+    # admixture_times += [x for x in range(100, 200, 10)]
+    # admixture_times += [x for x in range(200, 500, 25)]
 
     paper_args = argparse.Namespace(
             Ne=80,
             sample_size=80,
             model=None,
+            dtwf_file=args.dtwf_file,
+            hudson_file=args.hudson_file,
             admixture_prop=0.3,
             num_chroms=22,
-            replicates=3,
+            replicates=30,
+            CI_width=0.95,
             out_dir=args.out_dir,
             discretize_hack=True,
             plot=True,
@@ -211,44 +214,63 @@ def get_output_prefix(out_dir, admixture_times):
     return os.path.join(basedir, suffix)
 
 
-def get_simulation_variance(args, admixture_times, recombination_map):
+def get_simulation_variance(args, model, admixture_times, rec_map):
     nrows = len(admixture_times)
     ncols = args.replicates
     variance_array = np.zeros([nrows, ncols])
     prefix = get_output_prefix(args.out_dir, admixture_times)
 
-    var_df = pd.DataFrame(index=admixture_times)
-    CIs = []
-    for model in ['dtwf', 'hudson']:
-        args.model = model
-        for i, t in enumerate(admixture_times):
-            replicates = simulate(args, recombination_map, admixture_time=t)
-            props_replicates = get_ancestry_props(
-                    replicates,
-                    max_time=t,
-                    num_replicates=args.replicates)
+    for i, t in enumerate(admixture_times):
+        replicates = simulate(args, model,  rec_map, admixture_time=t)
+        props_replicates = get_ancestry_props(
+                replicates,
+                max_time=t,
+                num_replicates=args.replicates)
 
-            for j, props in enumerate(props_replicates):
-                variance_array[i, j] = np.var(props) / (1 - 1 / len(props))
+        for j, props in enumerate(props_replicates):
+            variance_array[i, j] = np.var(props) / (1 - 1 / len(props))
 
-        model_df = pd.DataFrame(
-                variance_array,
-                columns=range(args.replicates),
-                index=admixture_times)
-        average_variance = model_df.mean(axis=1)
-        var_df[model] = average_variance
-        var_df.to_csv(prefix + '.txt')
+    model_df = pd.DataFrame(
+            variance_array,
+            columns=range(args.replicates),
+            index=admixture_times)
 
-        ## Long-winded but other methods don't seem to allow specifying
-        ## percentiles
-        # model_CI = model_df.transpose().describe([0.025, 0.975]).transpose()
-        # CIs.append(model_CI[['2.5%', '97.5%']].transpose().values)
-        model_CI = model_df.transpose().describe([0.165, 0.835]).transpose()
-        CIs.append(model_CI[['16.5%', '83.5%']].transpose().values)
+    return model_df
 
-    errs = np.stack(CIs, axis=1)
 
-    return var_df, errs
+def get_mean_variance_with_CIs(model_df, CI_interval=0.95):
+    assert 0 < CI_interval <= 1
+
+    low_CI = 0.5 - (CI_interval / 2)
+    high_CI = 0.5 + (CI_interval / 2)
+    print(low_CI, high_CI)
+
+    ## Long-winded but other methods don't seem to allow specifying
+    ## percentiles
+    percentiles = [low_CI, high_CI]
+    CI_df = model_df.transpose().describe(percentiles).transpose()
+
+    ## This is awful. Pandas is inconsistent in how it handles trailing
+    ## zeros when rounding percentiles and converting to strings for
+    ## column names. This seems to handle all cases.
+    low_CI_column = str(np.round(low_CI * 100, 1)).strip('0.') + '%'
+    high_CI_column = str(np.round(high_CI * 100, 1)).strip('0.') + '%'
+    try:
+        CI_df = CI_df[['mean', low_CI_column, high_CI_column]]
+    except KeyError:
+        low_CI_column = str(np.round(low_CI * 100, 1)) + '%'
+        CI_df = CI_df[['mean', low_CI_column, high_CI_column]]
+
+    return CI_df
+
+
+def format_CIs_for_plot(CI_df):
+    errs = CI_df.drop(columns='mean').transpose().values
+    errs = errs.reshape(1, 2, -1)
+    errs[:, 0, :] = CI_df['mean'].transpose().values - errs[:, 0, :]
+    errs[:, 1, :] = errs[:, 1, :] - CI_df['mean'].transpose().values
+
+    return errs
 
 
 def main(args):
@@ -263,13 +285,39 @@ def main(args):
     else:
         models = [x.strip() for x in args.model.split(',')]
 
+    prefix = get_output_prefix(args.out_dir, admixture_times)
+
     positions, rates, num_loci = get_whole_genome_positions_rates_loci(args)
     rec_map = msprime.RecombinationMap(
             positions, rates, num_loci=num_loci)
 
-    var_df, errs = get_simulation_variance(args, admixture_times, rec_map)
+    dfs = {}
 
-    prefix = get_output_prefix(args.out_dir, admixture_times)
+    ## DTWF variance
+    if args.dtwf_file is not None:
+        df = pd.read_csv(args.dtwf_file, index_col=0)
+    else:
+        df = get_simulation_variance(args, 'dtwf', admixture_times, rec_map)
+        df.to_csv(prefix + '_replicates_dtwf.txt')
+
+    CI_df = get_mean_variance_with_CIs(df, CI_interval=args.CI_width)
+    errs = format_CIs_for_plot(CI_df)
+    dfs['dtwf'] = [CI_df, errs]
+
+
+    ## Hudson variance
+    if args.hudson_file is not None:
+        df = pd.read_csv(args.hudson_file, index_col=0)
+    else:
+        df = get_simulation_variance(args, 'hudson', admixture_times, rec_map)
+        df.to_csv(prefix + '_replicates_hudson.txt')
+
+    CI_df = get_mean_variance_with_CIs(df, CI_interval=args.CI_width)
+    errs = format_CIs_for_plot(CI_df)
+    dfs['hudson'] = [CI_df, errs]
+
+
+    ## Tracts expected variance
     length_in_morgans = positions[-1] / 1e8
     haploid_gravel_variance = [
             haploid_gravel_ancestry_variance(
@@ -280,8 +328,8 @@ def main(args):
                     args.Ne
             ) for T in admixture_times]
     print("Comparing vs tracts with", length_in_morgans, "Morgans")
-    var_df['Expected (haploid)'] = haploid_gravel_variance
-    var_df.to_csv(prefix + '.txt')
+    expected_df = pd.DataFrame(index=admixture_times)
+    expected_df['Expected (haploid)'] = haploid_gravel_variance
 
     if args.plot:
         sns.set_palette("muted", 8)
@@ -289,9 +337,12 @@ def main(args):
 
         fig, ax = plt.subplots()
 
-        sim_var_df = var_df.drop(columns='Expected (haploid)')
-        sim_var_df.plot(ax=ax, yerr=errs, capsize=2, fmt='o', legend=False)
-        var_df['Expected (haploid)'].plot(ax=ax, legend=False)
+        for model, (CI_df, errs) in dfs.items():
+            print(CI_df['mean'])
+            print(errs)
+            CI_df['mean'].plot(ax=ax, yerr=errs, capsize=2, fmt='.', legend=False,
+                    label=model)
+        expected_df.plot(ax=ax, legend=False)
 
         ax.set_xscale('log')
         ax.set_yscale('log')
@@ -305,10 +356,13 @@ if __name__ == "__main__":
     parser.add_argument("--Ne", type=int, default=80)
     parser.add_argument("--sample_size", type=int, default=80)
     parser.add_argument('--model', default=None)
+    parser.add_argument('--dtwf_file', default=None)
+    parser.add_argument('--hudson_file', default=None)
     parser.add_argument('--admixture_range', default="1,10")
     parser.add_argument('--admixture_prop', type=float, default=0.3)
     parser.add_argument('--num_chroms', type=int, default=22)
     parser.add_argument('--replicates', type=int, default=1)
+    parser.add_argument('--CI_width', type=float, default=0.66)
     parser.add_argument('--plot', action='store_true')
     parser.add_argument('--discretize_hack', action='store_true')
     parser.add_argument('--out_dir', default=os.path.expanduser('~/temp/'))
