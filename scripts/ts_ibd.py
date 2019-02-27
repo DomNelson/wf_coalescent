@@ -91,10 +91,7 @@ class TSRelatives:
     
     
     def get_first_ancestor_below_max_time(self, tree, node):
-        # print("Finding oldest anc above", node)
-        # print("in tree spanning", tree.get_interval())
         if self.node_times[node] > self.max_time:
-            print(-1)
             return -1
         
         parent = tree.get_parent(node)
@@ -124,14 +121,18 @@ class TSRelatives:
             if oldest_relevant_anc >= 0:
                 nodes.add(oldest_relevant_anc)
             
+        oldest_change = 0
         for node in nodes:
+            node_time = self.node_times[node]
+            if node_time > oldest_change:
+                oldest_change = node_time
             samples.update(tree.get_leaves(node))
             
-        return list(samples)
+        return list(samples), oldest_change
     
     
     def get_tree_min_common_ancestor_times(self, tree, edge_diff):
-        nodes_in_diff = self.get_samples_below_edge_diff(tree, edge_diff)
+        nodes_in_diff, _ = self.get_samples_below_edge_diff(tree, edge_diff)
         
         for a, b in combinations(nodes_in_diff, 2):
             if a == b:
@@ -221,21 +222,21 @@ class TSRelatives:
             
     def update_clusters(self, tree, diff, clusters):
         new_clusters = defaultdict(set)
-        changed_samples = self.get_samples_below_edge_diff(tree, diff)
-
-        # self.draw_trees(locus=tree.get_interval()[0])
-
-        # print("Old clusters:")
-        # print(clusters)
+        changed_samples, oldest_time = self.get_samples_below_edge_diff(tree, diff)
         
         ## First remove changed samples from existing clusters and update
         ## oldest anc if necessary
-        ## TODO: Problem here with continuity of clusters?
         for anc, cluster in clusters.items():
             if len(cluster) == 0:
                 continue
-            new_anc = self.get_first_ancestor_below_max_time(tree, anc)
-            new_clusters[new_anc].update(cluster.difference(changed_samples))
+
+            if self.node_times[anc] > oldest_time:
+                ## Don't need to check ancs older than oldest node in diff
+                new_clusters[anc].update(cluster.difference(changed_samples))
+            else:
+                ## These ancs may no longer be the closest to max_time
+                new_anc = self.get_first_ancestor_below_max_time(tree, anc)
+                new_clusters[new_anc].update(cluster.difference(changed_samples))
             
         ## Now add to new clusters
         for sample in changed_samples:
@@ -243,12 +244,9 @@ class TSRelatives:
             new_clusters[anc].add(sample)
             
         ## Sanity check - no clusters should share samples
-        for c1, c2 in combinations(new_clusters.values(), 2):
-            assert len(c1.intersection(c2)) == 0
+        # for c1, c2 in combinations(new_clusters.values(), 2):
+        #     assert len(c1.intersection(c2)) == 0
 
-        # print("New clusters:")
-        # print(new_clusters)
-            
         return new_clusters
         
                 
@@ -367,4 +365,16 @@ def plot_ibd_df(df, ca_times=None, min_length=1e6):
     plt.savefig('/home/dnelson/temp/test2.png')
 
     plt.show()
+
+
+def test_run():
+    ts_file = '/home/dnelson/project/wf_coalescent/results/IBD/Ne500_samples500_WG_ts_dtwf.h5'
+    ts = msprime.load(ts_file)
+
+    T = TSRelatives(10, ts)
+
+    # T.get_all_min_common_ancestor_times()
+    T.get_ibd()
+
+    return T
     
