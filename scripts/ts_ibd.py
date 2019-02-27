@@ -63,8 +63,8 @@ class TSRelatives:
 
         trees = self.ts.trees()
         for i, tree in enumerate(trees):
+            start, end = tree.get_interval()
             if locus is not None:
-                start, end = tree.get_interval()
                 if start > locus or end <= locus:
                     continue
 
@@ -74,6 +74,7 @@ class TSRelatives:
                     node_labels = {n: make_label(n) for n in tree.nodes()}
 
                 ## TODO: This logic is pretty ugly
+                print("Interval:", start, "-", end)
                 print(tree.draw(format='unicode', node_labels=node_labels))
                 if locus is not None:
                     break
@@ -89,54 +90,11 @@ class TSRelatives:
         return node_times
     
     
-    def get_node_diff_candidates(self, diff):
-        """
-        Returns nodes which may have been added or removed
-        in the diff - will be involved in the most edge diffs
-        """
-        counts = defaultdict(int)
-        for edge in diff:
-            counts[edge.parent] += 1
-            counts[edge.child] += 1
-            
-        max_count = max(counts.values())            
-        out_candidates = [node for node, count in counts.items() if count == max_count]
-
-        return out_candidates
-            
-            
-    def get_node_diff(self, diff_out, diff_in):
-        out_candidates = self.get_node_diff_candidates(diff_out)        
-        in_candidates = self.get_node_diff_candidates(diff_in)
-        
-        if len(in_candidates) > 1:
-            out_inds = []
-            for edge_out in diff_out:
-                out_inds.extend([edge_out.parent, edge_out.child])
-            in_candidates = [c for c in in_candidates if c not in out_inds]
-        
-        assert(len(in_candidates) == 1)
-        in_node = in_candidates[0]
-        
-        if len(out_candidates) > 1:
-            in_parents = [edge.parent for edge in diff_in]
-            out_candidates = [c for c in out_candidates if c not in in_parents]
-        
-        assert(len(out_candidates) == 1)
-        out_node = out_candidates[0]
-        
-        return out_node, in_node
-    
-    
-#     def get_new_lineage(self, diff_out, diff_in):
-#         """
-#         Returns new lineage as tuple (start_time, end_time). Ambiguous start times
-#         average over possible values.
-#         """
-#         out_node, in_node = self.get_node_diff(diff_out, diff_in)
-            
     def get_first_ancestor_below_max_time(self, tree, node):
+        # print("Finding oldest anc above", node)
+        # print("in tree spanning", tree.get_interval())
         if self.node_times[node] > self.max_time:
+            print(-1)
             return -1
         
         parent = tree.get_parent(node)
@@ -145,8 +103,11 @@ class TSRelatives:
             if parent_time > self.max_time:
                 break
             node = parent
-            parent_time = self.node_times[parent]
             parent = tree.get_parent(node)
+            parent_time = self.node_times[parent]
+
+        # print(node)
+        assert self.node_times[node] <= self.max_time
         
         return node
     
@@ -239,6 +200,7 @@ class TSRelatives:
     
 
     def get_initial_clusters(self, first_tree):
+        # self.draw_trees(locus=0)
         ancs = self.get_children_of_edges_crossing_max_time(locus=0)
         clusters = defaultdict(set)
         
@@ -250,6 +212,9 @@ class TSRelatives:
         
         for a in ancs:
             clusters[a] = set(first_tree.get_leaves(a))
+
+        # print("Initial clusters:")
+        # print(clusters)
         
         return clusters
             
@@ -257,12 +222,18 @@ class TSRelatives:
     def update_clusters(self, tree, diff, clusters):
         new_clusters = defaultdict(set)
         changed_samples = self.get_samples_below_edge_diff(tree, diff)
-#         segment, diff_in, diff_out = diff
-#         out_node, in_node = self.get_node_diff(diff_out, diff_in)
+
+        # self.draw_trees(locus=tree.get_interval()[0])
+
+        # print("Old clusters:")
+        # print(clusters)
         
         ## First remove changed samples from existing clusters and update
         ## oldest anc if necessary
+        ## TODO: Problem here with continuity of clusters?
         for anc, cluster in clusters.items():
+            if len(cluster) == 0:
+                continue
             new_anc = self.get_first_ancestor_below_max_time(tree, anc)
             new_clusters[new_anc].update(cluster.difference(changed_samples))
             
@@ -274,6 +245,9 @@ class TSRelatives:
         ## Sanity check - no clusters should share samples
         for c1, c2 in combinations(new_clusters.values(), 2):
             assert len(c1.intersection(c2)) == 0
+
+        # print("New clusters:")
+        # print(new_clusters)
             
         return new_clusters
         
@@ -318,9 +292,9 @@ class TSRelatives:
         
         ## TODO: Add last tree - integrate into main loop above
             i += 1
-            print(i)
+            # print(i)
             for cluster in clusters.values():
-                print(cluster)
+                # print(cluster)
                 ibd_pairs = combinations(sorted(cluster), 2)
                 for pair in ibd_pairs:
                     ## Check if we are starting a new IBD segment
