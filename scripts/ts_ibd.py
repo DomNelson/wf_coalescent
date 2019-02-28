@@ -16,6 +16,15 @@ from tqdm import tqdm
 from sortedcontainers import sortedlist
 import gc
 import weakref
+# from profilehooks import profile
+
+
+def expected_num_segs(t, K, L):
+    return (K + 2 * L * t) / 2 ** (2 * t - 1)
+
+
+def expected_total_length(t, L):
+    return L / 2 ** (2 * t - 1)
 
 
 class TSRelatives:
@@ -31,7 +40,6 @@ class TSRelatives:
         self.max_time = max_time
         self.bps = list(self.ts.breakpoints())
 
-        
         self.node_times = self.get_node_times()
         self.ca_times = scipy.sparse.lil_matrix((ts.num_samples, ts.num_samples))
         self.ca_last = scipy.sparse.lil_matrix((ts.num_samples, ts.num_samples))
@@ -109,7 +117,7 @@ class TSRelatives:
         return node
     
     
-    def get_samples_below_edge_diff(self, tree, edge_diff):
+    def get_samples_below_edge_diff_conservative(self, tree, edge_diff):
         nodes = set()
         samples = set()
         segment, edges_in, edges_out = edge_diff
@@ -131,12 +139,29 @@ class TSRelatives:
         return list(samples), oldest_change
     
     
+    def get_samples_below_edge_diff(self, tree, edge_diff):
+        samples = set()
+        segment, edges_in, edges_out = edge_diff
+        assert type(edges_in) == list
+        
+        oldest_change = 0
+        for edge in edges_in + edges_out:
+            node_time = self.node_times[edge.parent]
+            if node_time > oldest_change:
+                oldest_change = node_time
+            s = tree.get_leaves(edge.parent)
+            samples.update(s)
+            
+        return list(samples), oldest_change
+    
+    
     def get_tree_min_common_ancestor_times(self, tree, edge_diff):
-        nodes_in_diff, _ = self.get_samples_below_edge_diff(tree, edge_diff)
+        nodes_in_diff, _ = self.get_samples_below_edge_diff_conservative(tree, edge_diff)
         
         for a, b in combinations(nodes_in_diff, 2):
             if a == b:
                 continue
+            a, b = sorted([a, b])
             ca = tree.get_mrca(a, b)
             ca_time = self.node_times[ca]
             if ca_time > self.max_time:
@@ -221,35 +246,36 @@ class TSRelatives:
             
             
     def update_clusters(self, tree, diff, clusters):
-        new_clusters = defaultdict(set)
         changed_samples, oldest_time = self.get_samples_below_edge_diff(tree, diff)
         
         ## First remove changed samples from existing clusters and update
         ## oldest anc if necessary
-        for anc, cluster in clusters.items():
-            if len(cluster) == 0:
-                continue
+        ancs = list(clusters.keys())
+        num_updates = 0
+        for anc in ancs:
 
-            if self.node_times[anc] > oldest_time:
-                ## Don't need to check ancs older than oldest node in diff
-                new_clusters[anc].update(cluster.difference(changed_samples))
-            else:
+            if self.node_times[anc] <= oldest_time:
                 ## These ancs may no longer be the closest to max_time
                 new_anc = self.get_first_ancestor_below_max_time(tree, anc)
-                new_clusters[new_anc].update(cluster.difference(changed_samples))
+                cluster = clusters.pop(anc)
+                clusters[new_anc].update(cluster.difference(changed_samples))
+                num_updates += 1
             
         ## Now add to new clusters
         for sample in changed_samples:
             anc = self.get_first_ancestor_below_max_time(tree, sample)
-            new_clusters[anc].add(sample)
+            clusters[anc].add(sample)
             
         ## Sanity check - no clusters should share samples
         # for c1, c2 in combinations(new_clusters.values(), 2):
         #     assert len(c1.intersection(c2)) == 0
 
-        return new_clusters
+        # print(len(ancs), num_updates)
+
+        return clusters
         
                 
+    # @profile
     def get_ibd(self):        
         n = self.ts.num_samples
         ibd_start = scipy.sparse.lil_matrix((n, n), dtype=int)
@@ -326,9 +352,23 @@ def ibd_list_to_df(ibd_list, ca_times=None):
     return df
 
 
-def plot_ibd_df(df, ca_times=None, min_length=1e6):
+def plot_expected_ibd(max_ca_time, length_in_morgans, ax, K=22):
+    ## Get theory points
+    K = 22
+    L = length_in_morgans
+    times = range(1, max_ca_time + 1)
+
+    expected_x = [expected_total_length(t, L) * 1e8 for t in times]
+    expected_y = [expected_num_segs(t, K, L) for t in times]
+
+    ax.scatter(expected_x, expected_y, s=20, c='black')
+
+
+def plot_ibd_df(df, ca_times=None, min_length=1e6, ax=None, max_ca_time=5):
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(8, 4))
+
     df = df[df['len'] >= min_length]
-    plt.figure(figsize=(8, 4))
 
     df = df.assign(count=np.ones(df.shape[0]))
     max_ca_time = 0
@@ -339,42 +379,86 @@ def plot_ibd_df(df, ca_times=None, min_length=1e6):
         
         df2 = df2.assign(colours=np.zeros(df2.shape[0]))
         if ca_times is not None:
+            get_ca_time = lambda x: ca_times[sorted([ind, x])[0], sorted([ind, x])[1]]
             df2 = df2.assign(
-                    tmrca=df2['ind2'].apply(lambda x: ca_times[ind, x]), axis=1
+                    tmrca=df2['ind2'].apply(get_ca_time), axis=1
                     )
 
             if df2['tmrca'].max() > max_ca_time:
                 max_ca_time = df2['tmrca'].max()
 
-        max_ca_time = 5
-        df2 = df2[df2['tmrca'] > 0]
+        ## TODO: Should assert that all ca_times > 0
         df2 = df2[df2['tmrca'] <= max_ca_time]
         num_segments = df2['count'].values
         total_IBD = df2['len'].values
         colours = df2['tmrca'].values
     
-        plt.scatter(total_IBD, num_segments, c=colours, s=10,
+        ax.scatter(total_IBD, num_segments, c=colours, s=10,
                 cmap='viridis', vmin=0, vmax=max_ca_time)
 
-    plt.plot(x, y, 'o', c='black')
-    plt.title('WF Simulations')
-    plt.ylabel('Number of IBD segments')
-    plt.xlabel('Total IBD')
-    plt.xscale('log')
-    plt.colorbar()
-    plt.savefig('/home/dnelson/temp/test2.png')
+    ax.set_ylabel('Number of IBD segments')
+    ax.set_xlabel('Total IBD')
+    ax.set_xscale('log')
 
-    plt.show()
+    return ax
 
 
 def test_run():
-    ts_file = '/home/dnelson/project/wf_coalescent/results/IBD/Ne500_samples500_WG_ts_dtwf.h5'
+    ts_file = '/home/dnelson/project/wf_coalescent/results/' +\
+            'IBD/Ne500_samples500_WG_ts_dtwf.h5'
     ts = msprime.load(ts_file)
+    max_ibd_time_gens = 10
 
-    T = TSRelatives(10, ts)
+    ## Set up plot axes
+    fig, ax_arr = plt.subplots(2, 1, figsize=(5, 8), sharex=True, sharey=True)
 
-    # T.get_all_min_common_ancestor_times()
-    T.get_ibd()
+    ## Get DTWF common ancestor times for IBD segments
+    print("Loading DTWF")
+    T_dtwf = TSRelatives(max_ibd_time_gens, ts)
+    T_dtwf.get_all_min_common_ancestor_times()
+    # T_dtwf.get_ibd()
 
-    return T
+    ## Load DTWF IBD and plot
+    ibd_file = '/home/dnelson/project/wf_coalescent/results/' +\
+            'IBD/Ne500_samples500_WG_dtwf.npz'
+    loaded = np.load(ibd_file)
+    ibd_array = loaded['ibd_array']
+    ibd_df = ibd_list_to_df(ibd_array)
+    plot_ibd_df(ibd_df, T_dtwf.ca_times, ax=ax_arr[0])
+
+    ## Plot DTWF expected IBD cluster means
+    max_theory_ca_time = 5
+    K = 22
+    length_in_morgans = ts.get_sequence_length() / 1e8
+    plot_expected_ibd(max_theory_ca_time, length_in_morgans, ax=ax_arr[0], K=K)
+
+    ## Get Hudson common ancestor times for IBD segments
+    print("Loading Hudson")
+    ts_file = '/home/dnelson/project/wf_coalescent/results/' +\
+            'IBD/Ne500_samples500_WG_ts_hudson.h5'
+    ts = msprime.load(ts_file)
+    T_hudson = TSRelatives(max_ibd_time_gens, ts)
+    T_hudson.get_all_min_common_ancestor_times()
+
+    ## Load Hudson IBD and plot
+    ibd_file = '/home/dnelson/project/wf_coalescent/results/' +\
+            'IBD/Ne500_samples500_WG_hudson.npz'
+    loaded = np.load(ibd_file)
+    ibd_array = loaded['ibd_array']
+    ibd_df = ibd_list_to_df(ibd_array)
+    plot_ibd_df(ibd_df, T_hudson.ca_times, ax=ax_arr[1])
+
+    ## Jump through a few hoops to set colourbars
+    sm = plt.cm.ScalarMappable(cmap='viridis',
+            norm=plt.Normalize(vmin=0, vmax=max_ibd_time_gens))
+    sm._A = []
+    for ax in ax_arr:
+        fig.colorbar(sm, ax=ax)
+
+    return T_dtwf, T_hudson, fig, ax_arr
+
+
+if __name__ == "__main__":
+    T_dtwf, T_hudson, fig, ax_arr = test_run()
+    import IPython; IPython.embed()
     
