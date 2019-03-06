@@ -13,6 +13,22 @@ import pandas as pd
 from tqdm import tqdm
 
 
+def diploid_gravel_ancestry_variance(T, m, L, K, N):
+    """
+    T - admixture time
+    m - migration rate
+    L - total length
+    K - number of chromosomes
+    N - effective population size
+    """
+    A = m * (1 - m) / 2 ** (T - 1)
+    B_num = 2 * m * (1 - m) * (1 - 1 / (2 * N)) ** (T - 1)
+    B_denom = 2 * (K + 1 * (T - 2) * L)
+    B = B_num / B_denom
+
+    return A + B
+
+
 def haploid_gravel_ancestry_variance(T, m, L, K, N):
     """
     T - admixture time
@@ -108,6 +124,15 @@ def get_ancestry_props(replicates, max_time, num_replicates):
             replicate_props = []
 
             samples = iter(ts.samples())
+            # while True:
+            #     try:
+            #         sample = next(samples)
+            #         sample_copy = next(samples)
+            #     except StopIteration:
+            #         break
+                # len1 = sum(ind_tracts[sample])
+                # len2 = sum(ind_tracts[sample_copy])
+                # prop = (len1 + len2) / (2 * total_length)
             for sample in samples:
                 sample = next(samples)
                 prop = sum(ind_tracts[sample])
@@ -181,7 +206,8 @@ def set_paper_params(args):
     print("Reproducing figure from paper - ignoring all args" +\
             " except --out_dir")
     print("*" * 79)
-    # admixture_times = [x for x in range(1, 5)]
+    # admixture_times = [x for x in range(100, 130, 10)]
+    admixture_times = [x for x in range(1, 5)]
     admixture_times = [x for x in range(1, 20)]
     admixture_times += [x for x in range(20, 50, 5)]
     admixture_times += [x for x in range(50, 100, 10)]
@@ -195,7 +221,7 @@ def set_paper_params(args):
             hudson_file=args.hudson_file,
             admixture_prop=0.3,
             num_chroms=22,
-            replicates=30,
+            replicates=1,
             CI_width=0.95,
             out_dir=args.out_dir,
             discretize_hack=True,
@@ -226,7 +252,7 @@ def get_simulation_variance(args, model, admixture_times, rec_map):
                 num_replicates=args.replicates)
 
         for j, props in enumerate(props_replicates):
-            variance_array[i, j] = np.var(props) / (1 - 1 / len(props))
+            variance_array[i, j] = np.var(props)# / (1 - 1 / len(props))
 
     model_df = pd.DataFrame(
             variance_array,
@@ -308,15 +334,24 @@ def main(args):
         assert(hudson_times == dtwf_times)
         admixture_times = hudson_times
     else:
-        df = get_simulation_variance(args, 'hudson', admixture_times, rec_map)
-        df.to_csv(prefix + '_replicates_hudson.txt')
-
+        pass
+    #     df = get_simulation_variance(args, 'hudson', admixture_times, rec_map)
+    #     df.to_csv(prefix + '_replicates_hudson.txt')
+    #
     CI_df = get_mean_variance_with_CIs(df, CI_interval=args.CI_width)
     errs = format_CIs_for_plot(CI_df)
     dfs['hudson'] = [CI_df, errs]
 
     ## Tracts expected variance
     length_in_morgans = positions[-1] / 1e8
+    diploid_gravel_variance = [
+            diploid_gravel_ancestry_variance(
+                    T,
+                    args.admixture_prop,
+                    length_in_morgans,
+                    args.num_chroms,
+                    args.Ne
+            ) for T in admixture_times]
     haploid_gravel_variance = [
             haploid_gravel_ancestry_variance(
                     T,
@@ -328,6 +363,7 @@ def main(args):
     print("Comparing vs tracts with", length_in_morgans, "Morgans")
     expected_df = pd.DataFrame(index=admixture_times)
     expected_df['Expected (haploid)'] = haploid_gravel_variance
+    # expected_df['Expected (diploid)'] = diploid_gravel_variance
 
     if args.plot:
         sns.set_palette("muted", 8)
@@ -342,8 +378,11 @@ def main(args):
 
         ax.set_xscale('log')
         ax.set_yscale('log')
-        fig.legend()
+        ax.legend()
+        print("Plotting to", plot_file)
         fig.savefig(plot_file)
+
+        import IPython; IPython.embed()
 
 
 if __name__ == "__main__":
