@@ -361,7 +361,7 @@ def plot_expected_ibd(max_ca_time, length_in_morgans, ax, K=22):
     expected_x = [expected_total_length(t, L) * 1e8 for t in times]
     expected_y = [expected_num_segs(t, K, L) for t in times]
 
-    ax.scatter(expected_x, expected_y, s=20, c='black')
+    ax.scatter(expected_x, expected_y, s=20, c='black', label='Expected')
 
 
 def plot_ibd_df(df, ca_times=None, min_length=1e6, ax=None, max_ca_time=5):
@@ -393,24 +393,27 @@ def plot_ibd_df(df, ca_times=None, min_length=1e6, ax=None, max_ca_time=5):
         total_IBD = df2['len'].values
         colours = df2['tmrca'].values
     
-        ax.scatter(total_IBD, num_segments, c=colours, s=10,
+        ax.scatter(total_IBD, num_segments, c=colours, s=5,
                 cmap='viridis', vmin=0, vmax=max_ca_time)
 
     ax.set_ylabel('Number of IBD segments')
-    ax.set_xlabel('Total IBD')
+    ax.set_xlabel('')
+    if ax.is_last_row():
+        ax.set_xlabel('Total IBD')
     ax.set_xscale('log')
+    ax.set_xlim((0.7 * min_length, 4e9))
 
     return ax
 
 
-def test_run():
+def paper_plot():
     ts_file = '/home/dnelson/project/wf_coalescent/results/' +\
             'IBD/Ne500_samples500_WG_ts_dtwf.h5'
     ts = msprime.load(ts_file)
     max_ibd_time_gens = 10
 
     ## Set up plot axes
-    fig, ax_arr = plt.subplots(2, 1, figsize=(5, 8), sharex=True, sharey=True)
+    fig, ax_arr = plt.subplots(2, 1, figsize=(7, 7), sharex=True, sharey=True)
 
     ## Get DTWF common ancestor times for IBD segments
     print("Loading DTWF")
@@ -425,12 +428,7 @@ def test_run():
     ibd_array = loaded['ibd_array']
     ibd_df = ibd_list_to_df(ibd_array)
     plot_ibd_df(ibd_df, T_dtwf.ca_times, ax=ax_arr[0])
-
-    ## Plot DTWF expected IBD cluster means
-    max_theory_ca_time = 5
-    K = 22
-    length_in_morgans = ts.get_sequence_length() / 1e8
-    plot_expected_ibd(max_theory_ca_time, length_in_morgans, ax=ax_arr[0], K=K)
+    ax_arr[0].set_title('DTWF')
 
     ## Get Hudson common ancestor times for IBD segments
     print("Loading Hudson")
@@ -447,18 +445,43 @@ def test_run():
     ibd_array = loaded['ibd_array']
     ibd_df = ibd_list_to_df(ibd_array)
     plot_ibd_df(ibd_df, T_hudson.ca_times, ax=ax_arr[1])
+    ax_arr[1].set_title('Hudson')
+
+    ## Plot expected IBD cluster means
+    max_theory_ca_time = 5
+    K = 22
+    length_in_morgans = ts.get_sequence_length() / 1e8
+    plot_expected_ibd(max_theory_ca_time, length_in_morgans, ax=ax_arr[0], K=K)
+    plot_expected_ibd(max_theory_ca_time, length_in_morgans, ax=ax_arr[1], K=K)
+
+    ## Legend only on upper plot
+    ax_arr[0].legend()
 
     ## Jump through a few hoops to set colourbars
     sm = plt.cm.ScalarMappable(cmap='viridis',
             norm=plt.Normalize(vmin=0, vmax=max_ibd_time_gens))
     sm._A = []
-    for ax in ax_arr:
-        fig.colorbar(sm, ax=ax)
+
+    # for ax in ax_arr:
+    # cbar_ax = fig.add_axes([0.85, 0.15, 0.05, 0.7])
+    # cbar = fig.colorbar(sm, cax=cbar_ax)
+    cbar = fig.colorbar(sm, aspect=50, ax=ax_arr.ravel().tolist())
+    cbar.ax.get_yaxis().labelpad = 5
+    cbar.ax.set_ylabel('TMRCA', rotation=90)
 
     return T_dtwf, T_hudson, fig, ax_arr
 
 
 if __name__ == "__main__":
-    T_dtwf, T_hudson, fig, ax_arr = test_run()
+    if len(sys.argv) != 2:
+        print("Usage: python ts_ibd.py paper_plot_outfile")
+        sys.exit()
+
+    outfile = os.path.expanduser(sys.argv[1])
+
+    T_dtwf, T_hudson, fig, ax_arr = paper_plot()
+
+    fig.savefig(outfile)
+
     import IPython; IPython.embed()
     
