@@ -128,3 +128,7 @@ def simulate_and_plot_sfs(max_count, num_replicates, num_chroms=1):
 
     plot_sfs_list(sfs_list, models, max_count=max_count)
 
+
+if __name__ == "__main__":
+    simulate_and_plot_sfs(max_count=3, num_replicates=20, num_chroms=2)
+
