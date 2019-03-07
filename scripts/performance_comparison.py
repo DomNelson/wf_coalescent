@@ -51,8 +51,13 @@ class PerformanceComparison:
     ## TODO: Could allow passing of extra kwargs for simulations, to allow more
     ## flexible demographic events, for example
 
-    simulated_lengths: typing.List[float] = attr.ib(init=False, default=attr.Factory(list))
-    simulated_num_chroms: typing.List[int] = attr.ib(init=False, default=attr.Factory(list))
+    ## Complicated way of defining uninitialized empty collections
+    simulated_lengths: typing.List[float] = attr.ib(
+            init=False, default=attr.Factory(list)
+            )
+    simulated_num_chroms: typing.List[int] = attr.ib(
+            init=False, default=attr.Factory(list)
+            )
     simulation_times: dict = attr.ib(init=False, default=attr.Factory(dict))
 
 
@@ -103,6 +108,11 @@ class PerformanceComparison:
                 }
 
         return sim_kwargs
+
+
+    def time_hybrid_simulations(self, num_chroms):
+        print("Not implemented!")
+        sys.exit()
 
 
     def time_simulation(self, model, num_chroms):
@@ -175,18 +185,34 @@ class PerformanceComparison:
         return plot_dict
 
 
-def plot_times(**kwargs):
-    for key, value in kwargs.items():
-        print(key, value)
+def plot_times(plotfile=None, **sim_times):
+    lengths = sim_times.pop('lengths')
+    num_chroms = sim_times.pop('num_chroms')
+
+    fig, ax = plt.subplots()
+
+    for model, times_list in sim_times.items():
+        mean_times = [np.mean(times) for times in times_list]
+        ax.plot(lengths, mean_times, label=model)
+
+    ax.set_xlabel('Simulated length (base pairs)')
+    ax.set_ylabel('Time (s)')
+    ax.legend()
+    fig.savefig(plotfile)
 
 
 def main():
     outfile = os.path.expanduser('~/temp/times.npz')
+    plotfile  = os.path.expanduser('~/temp/times_plot_loaded.pdf')
+
+    # loaded = np.load(outfile)
+    # plot_times(plotfile, **loaded)
+
     P = PerformanceComparison(
             Ne=100,
-            sample_size=100,
-            max_chroms=2,
-            replicates=10,
+            sample_size=1000,
+            max_chroms=10,
+            replicates=3,
             )
 
     models = ['hudson', 'dtwf']
@@ -196,10 +222,7 @@ def main():
         P.save(outfile)
 
     pd = P.format_for_plot()
-    print(pd)
-    print(np.array(pd['hudson']))
-    print(np.array(pd['hudson']).shape)
-
+    plot_times(plotfile, **pd)
 
 if __name__ == "__main__":
     main()
