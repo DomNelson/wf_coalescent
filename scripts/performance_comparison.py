@@ -22,11 +22,31 @@ class PerformanceComparison:
     rho: float = 1e-8
     max_chroms: int = 22
     replicates: int = 10
-    chrom_lengths: typing.List[float] = [277693825, 2633496065, 224483368,
-            212778391, 203765845, 1929517394, 1867959329, 1701765192,
-            168073935, 1789473882, 1594854258, 172777271, 126940475, 116331251,
-            12554709, 1348911043, 129292106, 118978483, 1077960694, 1079243479,
-            61526812, 72706815]
+
+    ## TODO: Check these lengths!
+    chrom_lengths: typing.List[float] = [
+            277693825,
+            263349606,
+            224483368,
+            212778391,
+            203765845,
+            192951739,
+            186795932,
+            170176519,
+            168073935,
+            178947388,
+            159485425,
+            172777271,
+            126940475,
+            116331251,
+            12554709,
+            13489110,
+            12929210,
+            11897848,
+            10779606,
+            10792434,
+            61526812,
+            72706815]
 
     ## TODO: Could allow passing of extra kwargs for simulations, to allow more
     ## flexible demographic events, for example
@@ -97,7 +117,7 @@ class PerformanceComparison:
             ts = msprime.simulate(**sim_kwargs)
             times.append(time.time() - start_time)
 
-        return times
+        return np.array(times)
 
 
     def update_simulated_lengths(self, num_chroms):
@@ -108,17 +128,30 @@ class PerformanceComparison:
         self.simulated_lengths.append(new_length)
 
 
-    def store_simulation_times(self, model):
-        times = []
+    def initialize(self, models):
+        ## These lists should be empty
+        assert len(self.simulated_lengths) == 0
+        assert len(self.simulated_num_chroms) == 0
+
+        ## This dict should be empty
+        assert len(self.simulation_times) == 0
+
+        for model in models:
+            self.simulation_times[model] = []
+
+
+    def store_simulation_times(self, models):
+        self.initialize(models)
+
         for num_chroms in range(1, self.max_chroms + 1):
-            print("Model:", model + ',', "first", num_chroms, "chromosomes:")
-            sim_times = self.time_simulation(model, num_chroms)
-            times.append(sim_times)
+            for model in models:
+                print("Model:", model + ',', "first", num_chroms, "chromosomes:")
+                sim_times = self.time_simulation(model, num_chroms)
+                self.simulation_times[model].append(sim_times)
 
             self.update_simulated_lengths(num_chroms)
 
-        times_array = np.array(times)
-        self.simulation_times[model] = times_array
+        ##TODO: Could rewrite these as filling in pre-allocated array
 
 
     def save(self, outfile):
@@ -129,7 +162,7 @@ class PerformanceComparison:
                 )
 
 
-    def format_for_plot():
+    def format_for_plot(self):
         """
         Returns simulation results in the same format as they would be if
         loaded from saved results using np.load(outfile)
@@ -152,17 +185,20 @@ def main():
     P = PerformanceComparison(
             Ne=100,
             sample_size=100,
-            max_chroms=1,
+            max_chroms=2,
             replicates=10,
             )
 
-    P.store_simulation_times(model='hudson')
-    P.store_simulation_times(model='dtwf')
+    models = ['hudson', 'dtwf']
+    P.store_simulation_times(models=models)
 
     if outfile is not None:
         P.save(outfile)
 
-    plot_times(dtwf_times=dtwf_times, hudson_times=hudson_times)
+    pd = P.format_for_plot()
+    print(pd)
+    print(np.array(pd['hudson']))
+    print(np.array(pd['hudson']).shape)
 
 
 if __name__ == "__main__":
