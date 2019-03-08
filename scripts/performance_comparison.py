@@ -32,31 +32,13 @@ class PerformanceComparison:
     ## Workaround to simplify multiple hybrid simulations
     _temp_hybrid_wf_gens: int = attr.ib(init=False, default=-1)
 
-
-    ## TODO: Check these lengths!
+    ## Lengths from GRCh38.p12
     chrom_lengths: typing.List[float] = [
-            277693825,
-            263349606,
-            224483368,
-            212778391,
-            203765845,
-            192951739,
-            186795932,
-            170176519,
-            168073935,
-            178947388,
-            159485425,
-            172777271,
-            126940475,
-            116331251,
-            12554709,
-            13489110,
-            12929210,
-            11897848,
-            10779606,
-            10792434,
-            61526812,
-            72706815]
+	    248956422, 242193529, 198295559, 190214555, 181538259,
+	    170805979, 159345973, 145138636, 138394717, 133797422,
+	    135086622, 133275309, 114364328, 107043718, 101991189,
+	    90338345, 83257441, 80373285, 58617616, 64444167,
+	    46709983, 50818468]
 
     ## TODO: Could allow passing of extra kwargs for simulations, to allow more
     ## flexible demographic events, for example
@@ -253,19 +235,20 @@ def plot_times(plotfile=None, **sim_times):
 
 def main():
     outfile = os.path.expanduser('~/temp/times_hybrid2.npz')
-    plotfile  = os.path.expanduser('~/temp/times_hybrid2_plot.pdf')
+    plotfile  = os.path.expanduser('~/temp/times_hybrid2_plot.png')
 
     # loaded = np.load(outfile)
     # plot_times(plotfile, **loaded)
-    short_chroms = [1e6, 1e6, 1e6]
+    short_chroms = [1e6] * 22
 
     P = PerformanceComparison(
             # chrom_lengths=short_chroms,
-            Ne=500,
-            sample_size=500,
-            max_chroms=10,
-            replicates=1,
-            hybrid_wf_gens=[200, 500, 1000],
+            Ne=1000,
+            sample_size=100,
+            max_chroms=22,
+            replicates=10,
+            hybrid_wf_gens=[5, 20, 50],
+            # hybrid_wf_gens=[200, 500, 1000],
             )
 
     # models = ['hudson', 'dtwf']
