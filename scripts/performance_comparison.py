@@ -14,6 +14,8 @@ import time
 from tqdm import tqdm
 import attr
 import typing
+from cycler import cycler
+mpl.rcParams['axes.prop_cycle'] = cycler(color='bgrcmyk')
 
 
 @attr.s(auto_attribs=True)
@@ -130,11 +132,15 @@ class PerformanceComparison:
                     )
 
         hybrid_kwargs['model'] = 'hudson'
+        Ne = hybrid_kwargs['population_configurations'][0].initial_size
         hybrid_kwargs['population_configurations'] = None
         hybrid_ts = msprime.simulate(
                 from_ts=dtwf_ts,
+                Ne=Ne,
                 **hybrid_kwargs,
                 )
+
+        # import IPython; IPython.embed()
 
         return hybrid_ts
 
@@ -246,18 +252,20 @@ def plot_times(plotfile=None, **sim_times):
 
 
 def main():
-    outfile = os.path.expanduser('~/temp/times_hybrid_2_5_10_50.npz')
-    plotfile  = os.path.expanduser('~/temp/times_hybrid_2_5_10_50_plot.pdf')
+    outfile = os.path.expanduser('~/temp/times_hybrid2.npz')
+    plotfile  = os.path.expanduser('~/temp/times_hybrid2_plot.pdf')
 
     # loaded = np.load(outfile)
     # plot_times(plotfile, **loaded)
+    short_chroms = [1e6, 1e6, 1e6]
 
     P = PerformanceComparison(
+            # chrom_lengths=short_chroms,
             Ne=500,
             sample_size=500,
             max_chroms=10,
-            replicates=3,
-            hybrid_wf_gens=[2, 5, 10, 50],
+            replicates=1,
+            hybrid_wf_gens=[200, 500, 1000],
             )
 
     # models = ['hudson', 'dtwf']
