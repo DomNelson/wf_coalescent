@@ -7,6 +7,7 @@ import matplotlib as mpl
 mpl.use('Agg')
 import matplotlib.pyplot as plt
 import seaborn as sns
+from collections import defaultdict
 import argparse
 import pandas as pd
 import time
@@ -22,6 +23,13 @@ class PerformanceComparison:
     rho: float = 1e-8
     max_chroms: int = 22
     replicates: int = 10
+    hybrid_wf_gens: typing.List[int] = attr.ib(
+            default=attr.Factory(list)
+            )
+
+    ## Workaround to simplify multiple hybrid simulations
+    _temp_hybrid_wf_gens: int = attr.ib(init=False, default=-1)
+
 
     ## TODO: Check these lengths!
     chrom_lengths: typing.List[float] = [
@@ -58,7 +66,7 @@ class PerformanceComparison:
     simulated_num_chroms: typing.List[int] = attr.ib(
             init=False, default=attr.Factory(list)
             )
-    simulation_times: dict = attr.ib(init=False, default=attr.Factory(dict))
+    simulation_times: dict = attr.ib(init=False, default=defaultdict(list))
 
 
     def get_positions_rates(self, num_chroms=22):
@@ -84,7 +92,7 @@ class PerformanceComparison:
         print(positions, rates)
 
         ## HACK: Discretization hack to avoid overflow for WG
-        num_loci = int(positions[-1] / 10)
+        num_loci = int(positions[-1] / 100)
 
         recombination_map = msprime.RecombinationMap(
                 positions, rates, num_loci
@@ -110,9 +118,25 @@ class PerformanceComparison:
         return sim_kwargs
 
 
-    def time_hybrid_simulations(self, num_chroms):
-        print("Not implemented!")
-        sys.exit()
+    def run_hybrid_simulations(self, sim_kwargs):
+        assert len(self.hybrid_wf_gens) > 0
+        assert self._temp_hybrid_wf_gens > 0
+
+        hybrid_kwargs = sim_kwargs.copy()
+        hybrid_kwargs['model'] = 'dtwf'
+        dtwf_ts = msprime.simulate(
+                    __tmp_max_time=self._temp_hybrid_wf_gens,
+                    **hybrid_kwargs,
+                    )
+
+        hybrid_kwargs['model'] = 'hudson'
+        hybrid_kwargs['population_configurations'] = None
+        hybrid_ts = msprime.simulate(
+                from_ts=dtwf_ts,
+                **hybrid_kwargs,
+                )
+
+        return hybrid_ts
 
 
     def time_simulation(self, model, num_chroms):
@@ -123,8 +147,15 @@ class PerformanceComparison:
 
         times = []
         for i in tqdm(range(self.replicates)):
+            ## This isn't the cleanest timing but we don't need super high
+            ## precision here
             start_time = time.time()
-            ts = msprime.simulate(**sim_kwargs)
+
+            if model.lower() == 'hybrid':
+                ts = self.run_hybrid_simulations(sim_kwargs)
+            else:
+                ts = msprime.simulate(**sim_kwargs)
+
             times.append(time.time() - start_time)
 
         return np.array(times)
@@ -146,18 +177,31 @@ class PerformanceComparison:
         ## This dict should be empty
         assert len(self.simulation_times) == 0
 
-        for model in models:
-            self.simulation_times[model] = []
-
 
     def store_simulation_times(self, models):
         self.initialize(models)
 
         for num_chroms in range(1, self.max_chroms + 1):
             for model in models:
-                print("Model:", model + ',', "first", num_chroms, "chromosomes:")
-                sim_times = self.time_simulation(model, num_chroms)
-                self.simulation_times[model].append(sim_times)
+                ## Not the cleanest but it'll do
+                if model.lower() == 'hybrid':
+                    for t in self.hybrid_wf_gens:
+                        self._temp_hybrid_wf_gens = t
+                        print("Model:", model + ',',
+                                "with", t, "WF generations,",
+                                "first", num_chroms, "chromosomes:")
+
+                        sim_times = self.time_simulation(model, num_chroms)
+                        label = 'hybrid_' + str(t)
+                        self.simulation_times[label].append(sim_times)
+
+                        ## Reset the temp variable
+                        self._temp_hybrid_wf_gens = -1
+                else:
+                    print("Model:", model + ',', "first",
+                            num_chroms, "chromosomes:")
+                    sim_times = self.time_simulation(model, num_chroms)
+                    self.simulation_times[model].append(sim_times)
 
             self.update_simulated_lengths(num_chroms)
 
@@ -202,20 +246,23 @@ def plot_times(plotfile=None, **sim_times):
 
 
 def main():
-    outfile = os.path.expanduser('~/temp/times.npz')
-    plotfile  = os.path.expanduser('~/temp/times_plot_loaded.pdf')
+    outfile = os.path.expanduser('~/temp/times_hybrid_2_5_10_50.npz')
+    plotfile  = os.path.expanduser('~/temp/times_hybrid_2_5_10_50_plot.pdf')
 
     # loaded = np.load(outfile)
     # plot_times(plotfile, **loaded)
 
     P = PerformanceComparison(
-            Ne=100,
-            sample_size=1000,
+            Ne=500,
+            sample_size=500,
             max_chroms=10,
             replicates=3,
+            hybrid_wf_gens=[2, 5, 10, 50],
             )
 
-    models = ['hudson', 'dtwf']
+    # models = ['hudson', 'dtwf']
+    models = ['dtwf', 'hybrid', 'hudson']
+    # models = ['hybrid']
     P.store_simulation_times(models=models)
 
     if outfile is not None:
