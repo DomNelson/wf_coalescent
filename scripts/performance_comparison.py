@@ -14,6 +14,7 @@ import time
 from tqdm import tqdm
 import attr
 import typing
+import subprocess
 from cycler import cycler
 mpl.rcParams['axes.prop_cycle'] = cycler(color='bgrcmyk')
 
@@ -233,34 +234,74 @@ def plot_times(plotfile=None, **sim_times):
     fig.savefig(plotfile)
 
 
-def main():
+def submit_qsub_script(args):
+    pass
+
+
+def main(args):
+    if args.qsub:
+        assert args.walltime is not None
+        assert args.nprocs is not None
+        submit_qsub_script(args)
+        print("Job submitted!")
+        sys.exit()
+
+
     outfile = os.path.expanduser('~/temp/times_hybrid2.npz')
+    if args.outfile is not None:
+        outfile = os.path.expanduser(args.outfile)
+
     plotfile  = os.path.expanduser('~/temp/times_hybrid2_plot.png')
+    if args.plotfile is not None:
+        plotfile  = os.path.expanduser(args.plotfile)
+
+    models = [x.lower() for x in args.models.strip().split(',')]
+    if 'hybrid' in models:
+        assert args.hybrid_wf_gens is not None
 
     # loaded = np.load(outfile)
     # plot_times(plotfile, **loaded)
     short_chroms = [1e6] * 22
 
+    hybrid_wf_gens = None
+    if args.hybrid_wf_gens is not None:
+        hybrid_wf_gens = [int(x) for x in args.hybrid_wf_gens.strip().split(',')]
+
     P = PerformanceComparison(
             # chrom_lengths=short_chroms,
-            Ne=1000,
-            sample_size=100,
-            max_chroms=22,
-            replicates=10,
-            hybrid_wf_gens=[5, 20, 50],
-            # hybrid_wf_gens=[200, 500, 1000],
+            Ne=args.Ne,
+            sample_size=args.sample_size,
+            max_chroms=args.max_chroms,
+            replicates=args.replicates,
+            hybrid_wf_gens=hybrid_wf_gens,
             )
 
-    # models = ['hudson', 'dtwf']
-    models = ['dtwf', 'hybrid', 'hudson']
-    # models = ['hybrid']
     P.store_simulation_times(models=models)
 
     if outfile is not None:
         P.save(outfile)
 
     pd = P.format_for_plot()
-    plot_times(plotfile, **pd)
+
+    if plotfile is not None:
+        plot_times(plotfile, **pd)
+
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--paper_params", action='store_true')
+    parser.add_argument("--Ne", type=int, default=100)
+    parser.add_argument("--sample_size", type=int, default=100)
+    parser.add_argument('--max_chroms', type=int, default=5)
+    parser.add_argument('--replicates', type=int, default=1)
+    parser.add_argument('--plotfile', default=None)
+    parser.add_argument('--discretize_hack', action='store_true')
+    parser.add_argument('--hybrid_wf_gens', default=None)
+    parser.add_argument('--models', required=True)
+    parser.add_argument('--outfile', required=True)
+    parser.add_argument('--qsub', action='store_true')
+    parser.add_argument('--walltime')
+    parser.add_argument('--nprocs')
+
+    args = parser.parse_args()
+    main(args)
