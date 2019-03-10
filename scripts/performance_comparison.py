@@ -235,7 +235,32 @@ def plot_times(plotfile=None, **sim_times):
 
 
 def submit_qsub_script(args):
-    pass
+    tmp_file = '.qsub.sh'
+
+    header = '#!/bin/bash\n'
+    header += '#PBS -l walltime=' + str(args.walltime) + '\n'
+    header += '#PBS -l nodes=1:ppn=' + str(args.nprocs) + '\n'
+    header += '\n'
+
+    cmd = 'python ' + os.path.realpath(__file__) + ' '
+    for arg, value in args._get_kwargs():
+        ## For regular kwargs
+        if value is not None and type(value) is not bool:
+            cmd += '--' + arg + ' ' + str(value) + ' '
+
+        ## For action = 'store_true'
+        if value is True:
+            cmd += '--' + arg + ' '
+
+    cmd += '\n'
+
+    with open(tmp_file, 'w') as f:
+        f.write(header)
+        f.write(cmd)
+
+    ret = subprocess.run(['qsub', tmp_file], check=True)
+
+    import IPython; IPython.embed()
 
 
 def main(args):
