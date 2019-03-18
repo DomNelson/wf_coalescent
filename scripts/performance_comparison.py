@@ -15,8 +15,8 @@ from tqdm import tqdm
 import attr
 import typing
 import subprocess
-from cycler import cycler
-mpl.rcParams['axes.prop_cycle'] = cycler(color='bgrcmyk')
+# from cycler import cycler
+# mpl.rcParams['axes.prop_cycle'] = cycler(color='bgrcmyk')
 
 
 @attr.s(auto_attribs=True)
@@ -224,10 +224,14 @@ def plot_times(plotfile=None, **sim_times):
 
     fig, ax = plt.subplots()
 
-    for model, times_list in sim_times.items():
+    models = sorted(sim_times.keys())
+    for model in models:
+        times_list = sim_times[model]
         mean_times = [np.mean(times) for times in times_list]
         ax.plot(lengths, mean_times, label=model)
 
+    cur_x_low, cur_x_high = ax.get_xlim()
+    ax.set_xlim([0, cur_x_high])
     ax.set_xlabel('Simulated length (base pairs)')
     ax.set_ylabel('Time (s)')
     ax.legend()
