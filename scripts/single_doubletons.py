@@ -81,8 +81,8 @@ def simulate(model=None, num_replicates=1, num_chroms=22, rho=1e-8):
         model = 'hudson'
 
     pc = msprime.PopulationConfiguration(
-            initial_size=10000,
-            sample_size=20000,
+            initial_size=100,
+            sample_size=50,
             growth_rate=0
             )
 
@@ -100,74 +100,42 @@ def simulate(model=None, num_replicates=1, num_chroms=22, rho=1e-8):
     return replicates
 
 
-def plot_singletons_doubletons(sfs_df, outfile=None):
+def plot_singletons_doubletons(sfs_df, outfile=None, column_rename_dict=None):
     if outfile is None:
-        outfile = os.path.expanduser('~/temp/test2_singletons_doubletons_plot.png')
+        outfile = os.path.expanduser('~/temp/test_sfs_plot.png')
+
+    if column_rename_dict is not None:
+        sfs_df = sfs_df.replace(column_rename_dict)
 
     max_count = 2
+    samp = sfs_df[sfs_df['Frequency'] <= max_count]
 
-    fig, ax = plt.subplots()
+    fig, ax = plt.subplots(figsize=(5, 3.5))
+    sns.violinplot(x='Frequency', y='Count', hue='model', data=samp, ax=ax)
 
-    ## Pull models out of multi-index dataframe
-    models, _iterations = sfs_df.index.levels
+    plt.xticks([0, 1], ['Singletons', 'Doubletons'])
+    ax.set_xlabel('')
 
-    i = 0
-    width = 0.35
-    for model in models:
-        df = sfs_df.loc[model]
-
-        mean_sfs = df.mean(axis=0).values
-        mean_sfs = mean_sfs[:max_count]
-        sem = df.sem(axis=0).values
-        sem = sem[:max_count]
-
-        x_vals = np.arange(1, len(mean_sfs) + 1) + i * width
-        ax.errorbar(x_vals, mean_sfs,
-                        yerr=2*sem,
-                        fmt='.',
-                        capsize=2,
-                        label=model,
-                        )
-        i += 1
-
-    xTickMarks = ['Singletons', 'Doubletons']
-    ax.set_xticks(x_vals - width / 2)
-    xtickNames = ax.set_xticklabels(xTickMarks)
-    plt.setp(xtickNames, fontsize=10)
-
-    ax.set_ylabel('Count')
-    ax.legend()
     fig.savefig(outfile)
 
 
-def deprecated_plot_sfs(sfs_dict, models, max_count=None, outfile=None):
+def plot_sfs(sfs_df, max_count=None, outfile=None, column_rename_dict=None):
     if outfile is None:
         outfile = os.path.expanduser('~/temp/test2_sfs_plot.png')
 
-    fig, ax = plt.subplots()
+    if column_rename_dict is not None:
+        sfs_df = sfs_df.replace(column_rename_dict)
 
-    i = 0
-    width = 0.2
-    for sfs_replicates, model in zip(sfs_dict, models):
-        sfs_df = pd.DataFrame(sfs_replicates).fillna(0)
-        mean_sfs = sfs_df.mean(axis=0).values
-        sem = sfs_df.sem(axis=0).values
+    samp = sfs_df[sfs_df['Frequency'] <= max_count]
 
-        if max_count is not None:
-            mean_sfs = mean_sfs[:max_count]
-            sem = sem[:max_count]
-        x_vals = np.arange(1, len(mean_sfs) + 1) + i * width
-        ax.errorbar(x_vals, mean_sfs,
-                        yerr=2*sem,
-                        fmt='.',
-                        capsize=2,
-                        label=model,
-                        )
-        i += 1
-
+    fig, ax = plt.subplots(figsize=(5, 3.5))
+    sns.violinplot(x='Frequency', y='Count', hue='model', data=samp, ax=ax)
     ax.set_xlabel('Frequency')
-    ax.set_ylabel('Count')
-    ax.legend()
+
+    ## Could also set custom xticks here
+    # plt.xticks([0, 1, 2], ['Singletons', 'Doubletons', 'Tripletons'])
+    # ax.set_xlabel('')
+
     fig.savefig(outfile)
 
 
@@ -183,11 +151,15 @@ def get_sfs(ts, model):
 
     sfs_counter = Counter(counts)
     sfs = [sfs_counter[n] for n in range(1, max(sfs_counter.keys()) + 1)]
-    print("Singletons:", sfs[0], "Doubletons:", sfs[1])
+    try:
+        print("Singletons:", sfs[0], "Doubletons:", sfs[1])
+    except:
+        ## Only happens if (in very small sims) we get only singletons
+        pass
 
     df = pd.DataFrame()
-    df['frequency'] = range(1, max(sfs_counter.keys()) + 1)
-    df['count'] = sfs
+    df['Frequency'] = range(1, max(sfs_counter.keys()) + 1)
+    df['Count'] = sfs
     df['model'] = model
 
     return df
@@ -201,13 +173,13 @@ def plot_sfs_violin(sfs_df=None, sfs_file=None, plot_outfile=None, max_freq=2):
     if plot_outfile is None:
         plot_outfile = os.path.expanduser('~/temp/test_violin.pdf')
 
-    samp = df[df['frequency'] <= max_freq]
-    sns.violinplot(x='frequency', y='count', hue='model', data=samp)
+    samp = df[df['Frequency'] <= max_freq]
+    sns.violinplot(x='Frequency', y='Count', hue='model', data=samp)
 
 
 def write_sfs(sfs_df, outfile=None):
     if outfile is None:
-        outfile = os.path.expanduser('~/temp/Ne10000.txt')
+        outfile = os.path.expanduser('~/temp/test_sfs.txt')
 
     sfs_df.to_csv(outfile)
 
@@ -229,9 +201,10 @@ def simulate_and_plot_sfs(max_count, num_replicates, num_chroms=1, rho=1e-8):
     sfs_df = sfs_df.fillna(0)
 
     write_sfs(sfs_df, outfile=None)
-    # plot_singletons_doubletons(sfs_df)
+    plot_singletons_doubletons(sfs_df)
 
 
 if __name__ == "__main__":
-    simulate_and_plot_sfs(max_count=2, num_replicates=100, num_chroms=1, rho=1e-8)
+    simulate_and_plot_sfs(max_count=2, num_replicates=100,
+            num_chroms=1, rho=1e-8)
 
