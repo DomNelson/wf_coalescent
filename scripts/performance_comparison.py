@@ -1,7 +1,4 @@
 import sys, os
-sys.path.append('../../msprime')
-sys.path.append('../../msprime/lib/subprojects/git-submodules/tskit/python')
-import msprime
 import numpy as np
 import matplotlib as mpl
 mpl.use('Agg')
@@ -15,9 +12,14 @@ from tqdm import tqdm
 import attr
 import typing
 import subprocess
+import datetime
 # from cycler import cycler
 # mpl.rcParams['axes.prop_cycle'] = cycler(color='bgrcmyk')
 
+msprime_dir = os.path.expanduser('~/project/msprime')
+sys.path.append(msprime_dir)
+sys.path.append(msprime_dir + '/lib/subprojects/git-submodules/tskit/python')
+import msprime
 
 @attr.s(auto_attribs=True)
 class PerformanceComparison:
@@ -241,20 +243,50 @@ def plot_times(plotfile=None, **sim_times):
 def submit_qsub_script(args):
     tmp_file = '.qsub.sh'
 
+    node_feature = 'f3'
+    ppn = str(args.nprocs) + ':' + node_feature
+
     header = '#!/bin/bash\n'
     header += '#PBS -l walltime=' + str(args.walltime) + '\n'
-    header += '#PBS -l nodes=1:ppn=' + str(args.nprocs) + '\n'
+    header += '#PBS -l nodes=1:ppn=' + ppn + '\n'
     header += '\n'
 
-    cmd = 'python ' + os.path.realpath(__file__) + ' '
+    ## Build output filename from args
+    outfile_prefix = 'performance'
+    out_path = None
+    old_fname = None
+
+    cmd = 'source activate base\n\n'
+    cmd += 'python ' + os.path.realpath(__file__) + ' '
     for arg, value in args._get_kwargs():
+        ## Don't want qsub args in script
+        if arg in ['qsub', 'walltime', 'nprocs']:
+            continue
+
+        ## Build this later from other args
+        if arg == 'outfile':
+            out_path, old_fname = os.path.split(value)
+            continue
+
         ## For regular kwargs
         if value is not None and type(value) is not bool:
+            ## Convert commas if multiple models were specified
+            outfile_prefix += '_' + arg + '_' + str(value).replace(',', '_')
             cmd += '--' + arg + ' ' + str(value) + ' '
 
         ## For action = 'store_true'
         if value is True:
+            outfile_prefix += '_' + arg
             cmd += '--' + arg + ' '
+
+    ## Timestamp for output to avoid name conflicts
+    if out_path is not None:
+        timestamp = '{:%Y%m%d_%H%M%S}'.format(datetime.datetime.now())
+        fname = outfile_prefix + '_' + timestamp + '.npz'
+        out_file = os.path.join(out_path, fname)
+        cmd += '--outfile' + ' ' + out_file + ' '
+
+        print("Writing to", out_file)
 
     cmd += '\n'
 
@@ -263,8 +295,6 @@ def submit_qsub_script(args):
         f.write(cmd)
 
     ret = subprocess.run(['qsub', tmp_file], check=True)
-
-    import IPython; IPython.embed()
 
 
 def main(args):
