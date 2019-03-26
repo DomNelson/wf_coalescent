@@ -25,12 +25,17 @@ import msprime
 class PerformanceComparison:
     Ne: int
     sample_size: int
+    outfile: str
     rho: float = 1e-8
     max_chroms: int = 22
+    min_chroms: int = 1
     replicates: int = 10
     hybrid_wf_gens: typing.List[int] = attr.ib(
             default=attr.Factory(list)
             )
+
+    ## This is only included for repeatability
+    args: str = ''
 
     ## Workaround to simplify multiple hybrid simulations
     _temp_hybrid_wf_gens: int = attr.ib(init=False, default=-1)
@@ -43,9 +48,6 @@ class PerformanceComparison:
 	    90338345, 83257441, 80373285, 58617616, 64444167,
 	    46709983, 50818468]
 
-    ## TODO: Could allow passing of extra kwargs for simulations, to allow more
-    ## flexible demographic events, for example
-
     ## Complicated way of defining uninitialized empty collections
     simulated_lengths: typing.List[float] = attr.ib(
             init=False, default=attr.Factory(list)
@@ -54,6 +56,10 @@ class PerformanceComparison:
             init=False, default=attr.Factory(list)
             )
     simulation_times: dict = attr.ib(init=False, default=defaultdict(list))
+
+
+    def __attrs_post_init__(self):
+        self.outfile = os.path.expanduser(self.outfile)
 
 
     def get_positions_rates(self, num_chroms=22):
@@ -125,8 +131,6 @@ class PerformanceComparison:
                 **hybrid_kwargs,
                 )
 
-        # import IPython; IPython.embed()
-
         return hybrid_ts
 
 
@@ -172,7 +176,7 @@ class PerformanceComparison:
     def store_simulation_times(self, models):
         self.initialize(models)
 
-        for num_chroms in range(1, self.max_chroms + 1):
+        for num_chroms in range(self.min_chroms, self.max_chroms + 1):
             for model in models:
                 ## Not the cleanest but it'll do
                 if model.lower() == 'hybrid':
@@ -196,13 +200,15 @@ class PerformanceComparison:
 
             self.update_simulated_lengths(num_chroms)
 
-        ##TODO: Could rewrite these as filling in pre-allocated array
+            if self.outfile is not None:
+                self.save(self.outfile)
 
 
     def save(self, outfile):
         np.savez(outfile,
                 num_chroms=self.simulated_num_chroms,
                 lengths=self.simulated_lengths,
+                args=self.args,
                 **self.simulation_times
                 )
 
@@ -223,6 +229,10 @@ class PerformanceComparison:
 def plot_times(plotfile=None, **sim_times):
     lengths = sim_times.pop('lengths')
     num_chroms = sim_times.pop('num_chroms')
+
+    args = None
+    if 'args' in sim_times:
+        args = sim_times.pop('args')
 
     fig, ax = plt.subplots()
 
@@ -305,7 +315,6 @@ def main(args):
         print("Job submitted!")
         sys.exit()
 
-
     outfile = os.path.expanduser('~/temp/times_hybrid2.npz')
     if args.outfile is not None:
         outfile = os.path.expanduser(args.outfile)
@@ -318,31 +327,41 @@ def main(args):
     if 'hybrid' in models:
         assert args.hybrid_wf_gens is not None
 
-    # loaded = np.load(outfile)
-    # plot_times(plotfile, **loaded)
     short_chroms = [1e6] * 22
 
     hybrid_wf_gens = None
     if args.hybrid_wf_gens is not None:
         hybrid_wf_gens = [int(x) for x in args.hybrid_wf_gens.strip().split(',')]
 
+    ## Here we don't simulate, only plot and exit
+    if args.output_to_plot is not None:
+        fname = os.path.expanduser(args.output_to_plot)
+        print("\nNot simulating - loading output from", fname)
+        assert args.plotfile is not None
+
+        loaded = np.load(fname)
+        plot_times(plotfile, **loaded)
+        print("\nLoaded args:\n")
+        print(loaded['args'], '\n')
+        sys.exit()
+
+    ## Simulate and write output
     P = PerformanceComparison(
             # chrom_lengths=short_chroms,
             Ne=args.Ne,
             sample_size=args.sample_size,
+            min_chroms=args.min_chroms,
             max_chroms=args.max_chroms,
             replicates=args.replicates,
             hybrid_wf_gens=hybrid_wf_gens,
+            outfile=outfile,
+            args=args,
             )
 
     P.store_simulation_times(models=models)
 
-    if outfile is not None:
-        P.save(outfile)
-
-    pd = P.format_for_plot()
-
     if plotfile is not None:
+        pd = P.format_for_plot()
         plot_times(plotfile, **pd)
 
 
@@ -352,15 +371,17 @@ if __name__ == "__main__":
     parser.add_argument("--Ne", type=int, default=100)
     parser.add_argument("--sample_size", type=int, default=100)
     parser.add_argument('--max_chroms', type=int, default=5)
+    parser.add_argument('--min_chroms', type=int, default=1)
     parser.add_argument('--replicates', type=int, default=1)
     parser.add_argument('--plotfile', default=None)
     parser.add_argument('--discretize_hack', action='store_true')
     parser.add_argument('--hybrid_wf_gens', default=None)
-    parser.add_argument('--models', required=True)
-    parser.add_argument('--outfile', required=True)
+    parser.add_argument('--models', default='hudson')
+    parser.add_argument('--outfile')
     parser.add_argument('--qsub', action='store_true')
     parser.add_argument('--walltime')
     parser.add_argument('--nprocs')
+    parser.add_argument('--output_to_plot')
 
     args = parser.parse_args()
     main(args)
