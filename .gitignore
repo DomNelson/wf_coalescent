@@ -2,4 +2,5 @@ results/
 scripts/.ipynb_checkpoints/
 *.swp
 *.swo
+.qsub*
 __pycache__/
