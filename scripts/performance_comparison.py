@@ -225,6 +225,20 @@ class PerformanceComparison:
 
         return plot_dict
 
+def parse_model_name(name):
+    ret = name
+
+    if name == 'dtwf':
+        ret = 'msprime (WF)'
+    elif name == 'hudson':
+        ret = 'msprime (Hudson)'
+    elif 'hybrid' in name:
+        assert '_' in name
+        _, num_gens = name.split('_')
+        ret = 'hybrid (' + num_gens + ' WF generations)'
+
+    return ret
+
 
 def plot_times(plotfile=None, **sim_times):
     lengths = sim_times.pop('lengths')
@@ -238,9 +252,10 @@ def plot_times(plotfile=None, **sim_times):
 
     models = sorted(sim_times.keys())
     for model in models:
+        label = parse_model_name(model)
         times_list = sim_times[model]
         mean_times = [np.mean(times) for times in times_list]
-        ax.plot(lengths, mean_times, label=model)
+        ax.plot(lengths, mean_times, label=label)
 
     cur_x_low, cur_x_high = ax.get_xlim()
     ax.set_xlim([0, cur_x_high])
