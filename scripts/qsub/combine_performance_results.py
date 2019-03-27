@@ -3,7 +3,7 @@ sys.path.append('/home/dnelson/project/wf_coalescent/scripts/')
 import performance_comparison as pc
 import numpy as np
 
-results_dir = '/home/dnelson/project/wf_coalescent/results/performance/abacus/'
+results_dir = os.path.expanduser(sys.argv[1]) #'/home/dnelson/project/wf_coalescent/results/performance/abacus/'
 
 out_files_10000 = []
 out_files_500 = []
@@ -19,14 +19,27 @@ for entry in list(os.scandir(results_dir)):
         elif '10000' in name:
             out_files_10000.append(os.path.join(results_dir, entry.name))
 
+last_length = -1
 results_10000 = {}
 for f in out_files_10000:
+    print(f)
     loaded = np.load(f)
+    if last_length == -1:
+        last_length = loaded['lengths'][-1]
+    if last_length != loaded['lengths'][-1]:
+        print("Length mismatch!", last_length, loaded['lengths'][-1])
+        sys.exit()
     results_10000.update(loaded)
     
+last_length = -1
 results_500 = {}
 for f in out_files_500:
     loaded = np.load(f)
+    if last_length == -1:
+        last_length = loaded['lengths']
+    if last_length != loaded['lengths'].all():
+        print("Length mismatch!", last_length, loaded['lengths'])
+        sys.exit()
     results_500.update(loaded)
 
 plotfile_500 = '/home/dnelson/temp/perf_500.pdf'
