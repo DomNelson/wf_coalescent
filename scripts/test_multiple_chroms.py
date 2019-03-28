@@ -1,10 +1,12 @@
 import sys, os
 import numpy as np
-sys.path.append(os.path.expanduser('~/project/msprime'))
-import msprime
 import subprocess
 import argparse
 
+msprime_dir = os.path.expanduser('~/project/msprime')
+sys.path.append(msprime_dir)
+sys.path.append(msprime_dir + '/lib/subprojects/git-submodules/tskit/python')
+import msprime
 
 def get_positions_rates(chrom_lengths, rho):
     """
@@ -28,26 +30,27 @@ def main(args):
     Ne = args.Ne
     model = args.model
     sample_size = Ne
-    rho = 1e-7
+    rho = 1e-8
 
     chrom_lengths = [247249719, 242951149, 199501827, 191273063, 180857866,
             170899992, 158821424, 146274826, 140273252, 135374737, 134452384,
             132349534, 114142980, 106368585, 100338915, 88827254, 78774742,
             76117153, 63811651, 62435964, 46944323, 49691432]
-    num_loci = chrom_lengths[-1] + 1
+    # num_loci = chrom_lengths[-1] + 1
 
     # chrom_lengths = [1e8] * 10
 
     positions, rates = get_positions_rates(chrom_lengths, rho)
+    num_loci = int(positions[-1] / 100) ## Avoids overflow for whole-genome sims
     recombination_map = msprime.RecombinationMap(
             positions, rates, num_loci=num_loci
     )
-    for p, r in zip(positions, rates):
-        print(p, r)
+    # for p, r in zip(positions, rates):
+    #     print(p, r)
 
     for i in range(args.niter):
         seed = np.random.randint(1e9)
-        print("Simulating", model, "with random seed", seed)
+        print("Simulating", model, "with random seed", seed, file=sys.stderr)
         try:
             ts = msprime.simulate(Ne=Ne,
                     recombination_map=recombination_map,
