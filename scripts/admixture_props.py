@@ -296,6 +296,21 @@ def format_CIs_for_plot(CI_df):
     return errs
 
 
+def parse_model_name(name):
+    ret = name
+
+    if name == 'dtwf':
+        ret = 'msprime (WF)'
+    elif name == 'hudson':
+        ret = 'msprime (Hudson)'
+    elif 'hybrid' in name:
+        assert '_' in name
+        _, num_gens = name.split('_')
+        ret = 'hybrid (' + num_gens + ' WF generations)'
+
+    return ret
+
+
 def main(args):
     if args.paper_params:
         args, admixture_times = set_paper_params(args)
@@ -362,25 +377,31 @@ def main(args):
             ) for T in admixture_times]
     print("Comparing vs tracts with", length_in_morgans, "Morgans")
     expected_df = pd.DataFrame(index=admixture_times)
-    expected_df['Expected (haploid)'] = haploid_gravel_variance
+    expected_df['Expected'] = haploid_gravel_variance
     # expected_df['Expected (diploid)'] = diploid_gravel_variance
 
     if args.plot:
         sns.set_palette("muted", 8)
-        plot_file = prefix + '.png'
+        plot_file_png = prefix + '.png'
+        plot_file_pdf = prefix + '.pdf'
 
         fig, ax = plt.subplots()
 
         for model, (CI_df, errs) in dfs.items():
+            label = parse_model_name(model)
             CI_df['mean'].plot(ax=ax, yerr=errs, capsize=2, fmt='.', legend=False,
-                    label=model)
+                    label=label)
         expected_df.plot(ax=ax, legend=False)
 
         ax.set_xscale('log')
         ax.set_yscale('log')
         ax.legend()
-        print("Plotting to", plot_file)
-        fig.savefig(plot_file)
+        ax.set_xlabel('Number of generations')
+        ax.set_ylabel('Variance in ancestry')
+        print("Plotting to", plot_file_png)
+        fig.savefig(plot_file_png)
+        print("Plotting to", plot_file_pdf)
+        fig.savefig(plot_file_pdf)
 
         import IPython; IPython.embed()
 
