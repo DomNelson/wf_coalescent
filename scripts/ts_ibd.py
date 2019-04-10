@@ -10,6 +10,7 @@ from itertools import combinations
 import dask
 import sparse
 import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import pandas as pd
 from tqdm import tqdm
@@ -364,14 +365,14 @@ def plot_expected_ibd(max_ca_time, length_in_morgans, ax, K=22):
     ax.scatter(expected_x, expected_y, s=20, c='black', label='Expected')
 
 
-def plot_ibd_df(df, ca_times=None, min_length=1e6, ax=None, max_ca_time=5):
+def plot_ibd_df(df, ca_times=None, min_length=1e6, ax=None, max_ca_time=10):
     if ax is None:
         fig, ax = plt.subplots(figsize=(8, 4))
 
     df = df[df['len'] >= min_length]
 
     df = df.assign(count=np.ones(df.shape[0]))
-    max_ca_time = 0
+    # max_ca_time = 0
     for ind in set(df['ind1'].values):
         ind_df = df[df['ind1'] == ind][['ind2', 'len', 'count']]
         df2 = ind_df.groupby('ind2').sum()
@@ -384,8 +385,8 @@ def plot_ibd_df(df, ca_times=None, min_length=1e6, ax=None, max_ca_time=5):
                     tmrca=df2['ind2'].apply(get_ca_time), axis=1
                     )
 
-            if df2['tmrca'].max() > max_ca_time:
-                max_ca_time = df2['tmrca'].max()
+            # if df2['tmrca'].max() > max_ca_time:
+            #     max_ca_time = df2['tmrca'].max()
 
         ## TODO: Should assert that all ca_times > 0
         df2 = df2[df2['tmrca'] <= max_ca_time]
@@ -406,9 +407,36 @@ def plot_ibd_df(df, ca_times=None, min_length=1e6, ax=None, max_ca_time=5):
     return ax
 
 
+def paper_IBD_chrom_boundaries():
+    chrom_boundaries = [
+	    2489957506,
+	    2401130252,
+	    880975757,
+	    1061833623,
+	    490200867,
+	    689702694,
+	    2300791337,
+	    1232733615,
+	    247249718,
+	    2771097016,
+	    2708661052,
+	    1678103117,
+	    2568732248,
+	    2080279772,
+	    1813477854,
+	    1391555039,
+	    2194422752,
+	    1537829865,
+	    2644849401,
+	    2818041339,
+	    1947930238]
+
+    return chrom_boundaries
+
+
 def paper_plot():
-    ts_file = '/home/dnelson/project/wf_coalescent/results/' +\
-            'IBD/Ne500_samples500_WG_ts_dtwf.h5'
+    ts_file = os.path.expanduser('~/project/wf_coalescent/results/' +\
+            'IBD/Ne500_samples500_WG_ts_dtwf.h5')
     ts = msprime.load(ts_file)
     max_ibd_time_gens = 10
 
@@ -422,30 +450,30 @@ def paper_plot():
     # T_dtwf.get_ibd()
 
     ## Load DTWF IBD and plot
-    ibd_file = '/home/dnelson/project/wf_coalescent/results/' +\
-            'IBD/Ne500_samples500_WG_dtwf.npz'
+    ibd_file = os.path.expanduser('~/project/wf_coalescent/results/' +\
+            'IBD/Ne500_samples500_WG_dtwf.npz')
     loaded = np.load(ibd_file)
     ibd_array = loaded['ibd_array']
     ibd_df = ibd_list_to_df(ibd_array)
     plot_ibd_df(ibd_df, T_dtwf.ca_times, ax=ax_arr[0])
-    ax_arr[0].set_title('DTWF')
+    ax_arr[0].set_title('msprime (WF)')
 
     ## Get Hudson common ancestor times for IBD segments
     print("Loading Hudson")
-    ts_file = '/home/dnelson/project/wf_coalescent/results/' +\
-            'IBD/Ne500_samples500_WG_ts_hudson.h5'
+    ts_file = os.path.expanduser('~/project/wf_coalescent/results/' +\
+            'IBD/Ne500_samples500_WG_ts_hudson.h5')
     ts = msprime.load(ts_file)
     T_hudson = TSRelatives(max_ibd_time_gens, ts)
     T_hudson.get_all_min_common_ancestor_times()
 
     ## Load Hudson IBD and plot
-    ibd_file = '/home/dnelson/project/wf_coalescent/results/' +\
-            'IBD/Ne500_samples500_WG_hudson.npz'
+    ibd_file = os.path.expanduser('~/project/wf_coalescent/results/' +\
+            'IBD/Ne500_samples500_WG_hudson.npz')
     loaded = np.load(ibd_file)
     ibd_array = loaded['ibd_array']
     ibd_df = ibd_list_to_df(ibd_array)
     plot_ibd_df(ibd_df, T_hudson.ca_times, ax=ax_arr[1])
-    ax_arr[1].set_title('Hudson')
+    ax_arr[1].set_title('msprime (Hudson)')
 
     ## Plot expected IBD cluster means
     max_theory_ca_time = 5
