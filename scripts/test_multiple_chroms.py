@@ -36,12 +36,11 @@ def main(args):
             170899992, 158821424, 146274826, 140273252, 135374737, 134452384,
             132349534, 114142980, 106368585, 100338915, 88827254, 78774742,
             76117153, 63811651, 62435964, 46944323, 49691432]
-    # num_loci = chrom_lengths[-1] + 1
-
     # chrom_lengths = [1e8] * 10
 
     positions, rates = get_positions_rates(chrom_lengths, rho)
-    num_loci = int(positions[-1] / 100) ## Avoids overflow for whole-genome sims
+    num_loci = positions[-1] - 1
+    # num_loci = int(positions[-1] / 100) ## Avoids overflow for whole-genome sims
     recombination_map = msprime.RecombinationMap(
             positions, rates, num_loci=num_loci
     )
