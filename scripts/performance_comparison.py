@@ -259,7 +259,7 @@ def plot_times(plotfile=None, **sim_times):
 
     cur_x_low, cur_x_high = ax.get_xlim()
     ax.set_xlim([0, cur_x_high])
-    ax.set_xlabel('Simulated length (base pairs)')
+    ax.set_xlabel('Simulated length (bp)')
     ax.set_ylabel('Time (s)')
     ax.legend()
     fig.savefig(plotfile)

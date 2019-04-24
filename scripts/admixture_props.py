@@ -391,19 +391,22 @@ def main(args):
         plot_file_png = prefix + '.png'
         plot_file_pdf = prefix + '.pdf'
 
-        fig, ax = plt.subplots()
+        fig, ax = plt.subplots(figsize=(4.25, 3))
 
         for model, (CI_df, errs) in dfs.items():
             label = parse_model_name(model)
-            CI_df['mean'].plot(ax=ax, yerr=errs, capsize=2, fmt='.', legend=False,
-                    label=label)
+            CI_df['mean'].plot(ax=ax, yerr=errs, capsize=1, fmt='.', legend=False,
+                    label=label, linewidth=1, markersize=4)
         expected_df.plot(ax=ax, legend=False)
 
+        ax.set_xlim(0.9, 550)
         ax.set_xscale('log')
         ax.set_yscale('log')
         ax.legend()
         ax.set_xlabel('Number of generations')
-        ax.set_ylabel('Variance in ancestry')
+        ax.set_ylabel('Variance in ancestry proportion')
+
+        fig.tight_layout()
         print("Plotting to", plot_file_png)
         fig.savefig(plot_file_png)
         print("Plotting to", plot_file_pdf)

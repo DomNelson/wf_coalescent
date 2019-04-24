@@ -34,11 +34,13 @@ for f in out_files:
     for key, value in loaded.items():
         if key in ['num_chroms', 'lengths', 'args']:
             results[key] = value
+            print("Adding", key)
             continue
 
         if key in results:
             x = results[key]
             results[key] = np.hstack([x, value])
+            print("Appending", key)
         else:
             results[key] = value
 
@@ -62,6 +64,11 @@ for f in out_files:
 # pc.plot_times(plotfile_500, **results_500)
 
 plotfile_10000 = os.path.expanduser('~/temp/perf_10000.pdf')
-pc.plot_times(plotfile_10000, **results)
+
+try:
+    pc.plot_times(plotfile_10000, **results)
+except:
+    import IPython; IPython.embed()
+    raise
 
 
