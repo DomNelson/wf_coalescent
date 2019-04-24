@@ -41,7 +41,7 @@ def haploid_gravel_ancestry_variance(T, m, L, K, N):
     B_num = 2 * m * (1 - m) * (1 - 1 / (2 * N)) ** (T - 1)
     B_denom = 1 * (K + 1 * (T - 2) * L)
     B = B_num / B_denom
-    
+
     return A + B
 
 
@@ -88,16 +88,16 @@ def get_whole_genome_positions_rates_loci(args, rho=1e-8):
 
 def get_ind_tracts(ts, max_time):
     ind_tracts = collections.defaultdict(list)
-    
+
     key = lambda x: x.left
     migrations = sorted(ts.migrations(), key=key)
     trees = ts.trees()
     t = next(trees)
-    
+
     for migration in migrations:
         if migration.time > max_time:
             continue
-            
+
         node = migration.node
         length = migration.right - migration.left
 
@@ -141,7 +141,7 @@ def get_ancestry_props(replicates, max_time, num_replicates):
 
             ancestry_props.append(replicate_props)
             pbar.update(1)
-        
+
     return ancestry_props
 
 
@@ -214,11 +214,17 @@ def set_paper_params(args):
     admixture_times += [x for x in range(100, 200, 10)]
     admixture_times += [x for x in range(200, 525, 25)]
 
+    variance_dir = '../results/variance/combined_haploid_mig/'
+    dtwf_file = variance_dir + 'ancestry_varianceNe_80_admix_time_500' +\
+            '_admix_prop_0.3_nchroms_22_replicates_dtwf.txt'
+    hudson_file = variance_dir + 'ancestry_varianceNe_80_admix_time_500' +\
+            '_admix_prop_0.3_nchroms_22_replicates_hudson.txt'
+
     paper_args = argparse.Namespace(
             Ne=80,
             sample_size=80,
-            dtwf_file=args.dtwf_file,
-            hudson_file=args.hudson_file,
+            dtwf_file=dtwf_file,
+            hudson_file=hudson_file,
             admixture_prop=0.3,
             num_chroms=22,
             replicates=1,
@@ -296,6 +302,21 @@ def format_CIs_for_plot(CI_df):
     return errs
 
 
+def parse_model_name(name):
+    ret = name
+
+    if name == 'dtwf':
+        ret = 'msprime (WF)'
+    elif name == 'hudson':
+        ret = 'msprime (Hudson)'
+    elif 'hybrid' in name:
+        assert '_' in name
+        _, num_gens = name.split('_')
+        ret = 'hybrid (' + num_gens + ' WF generations)'
+
+    return ret
+
+
 def main(args):
     if args.paper_params:
         args, admixture_times = set_paper_params(args)
@@ -362,25 +383,31 @@ def main(args):
             ) for T in admixture_times]
     print("Comparing vs tracts with", length_in_morgans, "Morgans")
     expected_df = pd.DataFrame(index=admixture_times)
-    expected_df['Expected (haploid)'] = haploid_gravel_variance
+    expected_df['Expected'] = haploid_gravel_variance
     # expected_df['Expected (diploid)'] = diploid_gravel_variance
 
     if args.plot:
         sns.set_palette("muted", 8)
-        plot_file = prefix + '.png'
+        plot_file_png = prefix + '.png'
+        plot_file_pdf = prefix + '.pdf'
 
         fig, ax = plt.subplots()
 
         for model, (CI_df, errs) in dfs.items():
+            label = parse_model_name(model)
             CI_df['mean'].plot(ax=ax, yerr=errs, capsize=2, fmt='.', legend=False,
-                    label=model)
+                    label=label)
         expected_df.plot(ax=ax, legend=False)
 
         ax.set_xscale('log')
         ax.set_yscale('log')
         ax.legend()
-        print("Plotting to", plot_file)
-        fig.savefig(plot_file)
+        ax.set_xlabel('Number of generations')
+        ax.set_ylabel('Variance in ancestry')
+        print("Plotting to", plot_file_png)
+        fig.savefig(plot_file_png)
+        print("Plotting to", plot_file_pdf)
+        fig.savefig(plot_file_pdf)
 
         import IPython; IPython.embed()
 

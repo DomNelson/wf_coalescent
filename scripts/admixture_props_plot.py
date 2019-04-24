@@ -30,15 +30,15 @@ def get_positions_rates(chrom_lengths, rho):
 
 def get_ind_tracts(ts, max_time):
     ind_tracts = collections.defaultdict(list)
-    
+
     key = lambda x: x.left
     migrations = sorted(ts.migrations(), key=key)
     trees = ts.trees()
-    
+
     for migration in migrations:
         if migration.time > max_time:
             continue
-            
+
         stored = False
         node = migration.node
         length = migration.right - migration.left
@@ -49,11 +49,11 @@ def get_ind_tracts(ts, max_time):
                 samples = t.get_leaves(node)
             except ValueError:
                 continue
-                
+
             for s in samples:
                 ind_tracts[s].append(length)
             stored = True
-                
+
     return ind_tracts
 
 
@@ -70,7 +70,7 @@ def get_ancestry_props(replicates, max_time):
             replicate_props.append(prop)
 
         ancestry_props.append(replicate_props)
-        
+
     return ancestry_props
 
 
