@@ -10,17 +10,12 @@ import msprime
 import numpy as np
 import scipy.sparse
 from collections import defaultdict
-import bisect
 from itertools import combinations
-import dask
-import sparse
 import matplotlib
 import matplotlib.pyplot as plt
 import pandas as pd
 from tqdm import tqdm
-from sortedcontainers import sortedlist
-import gc
-import weakref
+import argparse
 # from profilehooks import profile
 
 
@@ -48,14 +43,12 @@ class TSRelatives:
             print("One of ts or ts_file must be specified")
             raise ValueError
             
+        if ts is None:
+            ts = msprime.load(ts_file)
+        self.ts = ts
+
         self.max_time = max_time
         self.bps = list(ts.breakpoints())
-
-        
-        self.ts = ts
-        if self.ts is None:
-            self.ts = msprime.load(ts_file)
-            
         self.node_times = self.get_node_times()
         self.ca_times = scipy.sparse.lil_matrix((ts.num_samples, ts.num_samples))
         self.ca_last = scipy.sparse.lil_matrix((ts.num_samples, ts.num_samples))
@@ -306,7 +299,8 @@ def plot_ibd(ibd_list, ca_times=None, min_length=0, out_file=None):
     print("Plotting!")
     fig, ax = plt.subplots()
     if out_file is None:
-        out_file = os.path.expanduser('~/temp/ibd_plot.png')
+        out_file = '~/temp/ibd_plot.png'
+    out_file = os.path.expanduser(out_file)
 	
     cols = ["ind1", "ind2", "start", "end"]
 
@@ -317,8 +311,6 @@ def plot_ibd(ibd_list, ca_times=None, min_length=0, out_file=None):
     ibd_df['count'] = 1
     inds = set(ibd_df['ind1'].values)
     for ind in inds:
-        # print(ind)
-        # print(len(inds))
         ind_df = ibd_df[ibd_df['ind1'] == ind]
         ind_pairwise_ibd_df = ind_df.groupby('ind2').sum()
         ind_pairwise_ibd_df = ind_pairwise_ibd_df.reset_index()
@@ -327,8 +319,6 @@ def plot_ibd(ibd_list, ca_times=None, min_length=0, out_file=None):
         num_segments = ind_pairwise_ibd_df['count'].values
         ind2 = ind_pairwise_ibd_df['ind2'].values
         sizes = np.ones(total_IBD.shape[0]) * 8
-        # print(len(sizes))
-        # print(total_IBD.shape)
 
         colours = None
         cmap = None
@@ -344,10 +334,7 @@ def plot_ibd(ibd_list, ca_times=None, min_length=0, out_file=None):
             colours = np.array(colours)
             cmap = 'viridis'
 
-        # print("Plotting")
         ax.scatter(total_IBD, num_segments, s=sizes, c=colours, cmap=cmap)
-        # print("Break!")
-        # break
 
     ax.set_ylabel('Number of IBD segments')
     ax.set_xlabel('Total IBD')
@@ -374,11 +361,21 @@ def ibd_list_to_df(ibd_list, ca_times=None):
 
 def simulate():
     rho = 1e-8
+    # chrom_lengths_morgans = [2.77693825, 2.633496065, 2.24483368, 
+	# 	2.12778391, 2.03765845, 1.929517394, 
+	# 	1.867959329, 1.701765192, 1.68073935, 
+	# 	1.789473882, 1.594854258, 1.72777271, 
+	# 	1.26940475, 1.16331251, 1.2554709, 
+	# 	1.348911043, 1.29292106, 1.18978483, 
+	# 	1.077960694, 1.079243479, 0.61526812, 
+	# 	0.72706815]
+    # chrom_lengths = [l * 1e8 for l in chrom_lengths_morgans]
+
     chrom_lengths = [247249719, 242951149, 199501827, 191273063, 180857866,
             170899992, 158821424, 146274826, 140273252, 135374737, 134452384,
             132349534, 114142980, 106368585, 100338915, 88827254, 78774742,
             76117153, 63811651, 62435964, 46944323, 49691432]
-    num_loci = chrom_lengths[-1] + 1
+    num_loci = int(chrom_lengths[-1] + 1)
 
     positions, rates = get_positions_rates(chrom_lengths, rho)
     recombination_map = msprime.RecombinationMap(
@@ -417,24 +414,27 @@ def run_tsr(ts, max_time=10):
 
     return tsr
 
-# ts_file = '/home/dnelson/project/wf_coalescent/results/IBD/Ne500_samples500_WG_ts_dtwf.h5'
-# ibd_file = '/home/dnelson/project/wf_coalescent/results/IBD/Ne500_samples500_WG_dtwf.npz'
-# loaded = np.load(ibd_file)
-# ibd_array = loaded['ibd_array']
-# ts = msprime.load(ts_file)
 
-if __name__ == "__main__":
-    ts = simulate()
-
-    tsr = TSRelatives(5, ts)
+def main(args):
+    tsr = TSRelatives(args.max_time, ts_file=args.ts_file)
     tsr.get_ibd()
     tsr.get_all_min_common_ancestor_times()
 
     try:
-        plot_ibd(tsr.ibd_list, tsr.ca_times, min_length=1e6)
+        plot_ibd(tsr.ibd_list, tsr.ca_times, min_length=args.min_length,
+                out_file=args.plot_out_file)
     except:
         print("Error!")
         import IPython; IPython.embed()
-    import IPython; IPython.embed()
 
 
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--ts_file', default='~/temp/')
+    parser.add_argument('--max_time', type=float, default=10)
+    parser.add_argument('--min_length', type=float, default=1e6)
+    parser.add_argument('--plot_out_file', default='~/temp/ibd_plot.png')
+
+    args = parser.parse_args()
+
+    main(args)
