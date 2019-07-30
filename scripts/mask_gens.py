@@ -1,14 +1,16 @@
 import sys
+import argparse
 
-step_size = 1
-if len(sys.argv) > 1:
-    if sys.argv[1] == '-h' or sys.argv[1] == '--help':
-        print("Reads lines from stdin in format 'time\\tnum_lineages and " +\
-                "strips those with time less than step_size apart from previous line")
-        print("Usage: cat num_lineages_file.txt | python mask_gens.py step_size > masked_num_lineages_file.txt")
-        sys.exit()
-    else:
-        step_size = float(sys.argv[1])
+parser = argparse.ArgumentParser(
+        description="Reads lines from stdin in format 'time\\tnum_lineages and " +\
+                "strips those with time less than step_size apart from previous" +\
+                "line. If provided, recent_step_size applies until switch_time" +\
+                "generations in the past."
+        )
+parser.add_argument("--global_step_size", type=float, default=1)
+parser.add_argument("--recent_step_size", type=float, default=0.01)
+parser.add_argument("--switch_time", type=float, default=100)
+args = parser.parse_args()
 
 time = 0
 while True:
@@ -30,4 +32,8 @@ while True:
 
     if float(t) >= time:
         print(t + '\t' + num_lineages)
-        time += step_size
+        while float(t) >= time:
+            if time < args.switch_time:
+                time += args.recent_step_size
+            else:
+                time += args.global_step_size
