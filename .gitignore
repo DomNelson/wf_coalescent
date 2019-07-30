@@ -4,3 +4,4 @@ scripts/.ipynb_checkpoints/
 *.swo
 .qsub*
 __pycache__/
+*.out
