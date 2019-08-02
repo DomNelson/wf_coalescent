@@ -1,4 +1,6 @@
 import sys, os
+sys.path.append("../../msprime")
+sys.path.append("../../msprime/lib/subprojects/git-submodules/tskit/python/")
 import msprime
 import numpy as np
 import scipy.sparse
@@ -52,6 +54,7 @@ def plot_ibd_df(df, ca_times=None, min_length=1e6, ax=None, max_ca_time=10):
         df2 = df2.reset_index()
 
         df2 = df2.assign(colours=np.zeros(df2.shape[0]))
+        df2['tmrca'] = 1e-9
         if ca_times is not None:
             get_ca_time = lambda x: ca_times[sorted([ind, x])[0], sorted([ind, x])[1]]
             df2 = df2.assign(
@@ -90,7 +93,20 @@ def main(args):
     ts = msprime.load(ts_file)
 
     ## Set up plot axes
-    fig, ax_arr = plt.subplots(2, 1, figsize=(7, 7), sharex=True, sharey=True)
+    fig, ax_arr = plt.subplots(3, 1, figsize=(7, 7), sharex=True, sharey=True)
+
+    ## Load Genizon IBD and plot
+    ibd_file = os.path.expanduser(args.genizon_ibd_file)
+    loaded = np.load(ibd_file)
+    ibd_array = loaded['ibd_array']
+    ibd_df = ibd_list_to_df(ibd_array)
+    # nrows = 100000
+    # ibd_df = pd.read_csv(ibd_file, nrows=nrows, delim_whitespace=True,
+    #         header=None, usecols=(1, 3, 5, 6, 10),
+    #         names=("ind1", "ind2", "start", "end", "len"))
+    # ibd_df['len'] = ibd_df['len'] * 1e6 # Convert cM to base pairs
+    plot_ibd_df(ibd_df, ax=ax_arr[0])
+    ax_arr[0].set_title('Genizon Data')
 
     ## Get DTWF common ancestor times for IBD segments
     print("Loading DTWF")
@@ -102,8 +118,8 @@ def main(args):
     loaded = np.load(ibd_file)
     ibd_array = loaded['ibd_array']
     ibd_df = ibd_list_to_df(ibd_array)
-    plot_ibd_df(ibd_df, ca_times_dtwf, ax=ax_arr[0])
-    ax_arr[0].set_title('msprime (WF)')
+    plot_ibd_df(ibd_df, ca_times_dtwf, ax=ax_arr[1])
+    ax_arr[1].set_title('msprime (WF)')
 
     ## Get Hudson common ancestor times for IBD segments
     print("Loading Hudson")
@@ -117,8 +133,8 @@ def main(args):
     loaded = np.load(ibd_file)
     ibd_array = loaded['ibd_array']
     ibd_df = ibd_list_to_df(ibd_array)
-    plot_ibd_df(ibd_df, ca_times_hudson, ax=ax_arr[1])
-    ax_arr[1].set_title('msprime (Hudson)')
+    plot_ibd_df(ibd_df, ca_times_hudson, ax=ax_arr[2])
+    ax_arr[2].set_title('msprime (Hudson)')
 
     ## Plot expected IBD cluster means
     max_theory_ca_time = 5
@@ -126,6 +142,7 @@ def main(args):
     length_in_morgans = ts.get_sequence_length() / 1e8
     plot_expected_ibd(max_theory_ca_time, length_in_morgans, ax=ax_arr[0], K=K)
     plot_expected_ibd(max_theory_ca_time, length_in_morgans, ax=ax_arr[1], K=K)
+    plot_expected_ibd(max_theory_ca_time, length_in_morgans, ax=ax_arr[2], K=K)
 
     ## Legend only on upper plot
     ax_arr[0].legend()
@@ -149,6 +166,7 @@ if __name__ == "__main__":
     parser.add_argument("--hudson_ibd_file", required=True)
     parser.add_argument("--hudson_ca_file", required=True)
     parser.add_argument("--hudson_ts_file", required=True)
+    parser.add_argument("--genizon_ibd_file", required=True)
     parser.add_argument("--outfile", required=True)
     parser.add_argument("--max_ibd_time_gens", type=int, default=10)
     args = parser.parse_args()
