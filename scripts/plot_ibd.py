@@ -78,7 +78,7 @@ def plot_ibd_df(df, ca_times=None, min_length=1e6, ax=None, max_ca_time=10):
     ax.set_ylabel('Number of IBD segments')
     ax.set_xlabel('')
     if ax.is_last_row():
-        ax.set_xlabel('Total IBD')
+        ax.set_xlabel('Total IBD (base pairs)')
     ax.set_xscale('log')
     ax.set_xlim((0.7 * min_length, 4e9))
 
@@ -136,7 +136,7 @@ def main(args):
     sm._A = []
     cbar = fig.colorbar(sm, aspect=50, ax=ax_arr.ravel().tolist())
     cbar.ax.get_yaxis().labelpad = 5
-    cbar.ax.set_ylabel('TMRCA', rotation=90)
+    cbar.ax.set_ylabel('TMRCA (generations)', rotation=90)
 
     fig.savefig(os.path.expanduser(args.outfile))
 

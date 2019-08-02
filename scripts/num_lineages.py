@@ -81,7 +81,7 @@ def simulate_num_lineages(args):
 
     chrom_lengths = [l * 1e8 for l in chrom_lengths_morgans]
     chrom_lengths = chrom_lengths[:args.nchroms]
-    print(sum(chrom_lengths))
+    # print(sum(chrom_lengths))
 
     # chrom_lengths = [1e8] * 10
     # print(sum(chrom_lengths) / 1e6)
