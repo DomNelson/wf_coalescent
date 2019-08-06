@@ -35,9 +35,20 @@ def ibd_list_to_df(ibd_list, diploid=False):
         diploid_dict = {}
         extra_haploids = len(inds) % 2
         for i in np.arange(0, len(inds) - extra_haploids, 2):
-            diploid_ind = "{}_{}".format(inds[i], inds[i+1])
-            diploid_dict[inds[i]] = diploid_ind
-            diploid_dict[inds[i+1]] = diploid_ind
+            ind1 = inds[i]
+            ind2 = inds[i+1]
+            # Convert GERMLINE decimal copy numbers to integer IDs
+            if ind1 != int(ind1):
+                ind1 = ind1 * 10
+            if ind2 != int(ind2):
+                ind2 = ind2 * 10
+            assert ind1 == int(ind1) and ind2 == int(ind2)
+            ind1 = int(ind1)
+            ind2 = int(ind2)
+
+            diploid_ind = float("{}.{}".format(ind1, ind2))
+            diploid_dict[ind1] = diploid_ind
+            diploid_dict[ind2] = diploid_ind
 
         df[['ind1', 'ind2']] = df[['ind1', 'ind2']].replace(
                 to_replace=diploid_dict)
@@ -73,7 +84,23 @@ def get_tmrca(ind1, ind2, ca_times):
                 if t > 0 and t < tmrca:
                     tmrca = ca_times[idx1, idx2]
 
-    else:
+    elif isinstance(ind1, float) and isinstance(ind2, float):
+        tmrca = np.inf
+        ind1 = str(ind1)
+        ind2 = str(ind2)
+        assert '.' in ind1 and '.' in ind2
+        # Can't convert str representation of float to int directly
+        ind1_copies = [int(float(x)) for x in ind1.split('.')]
+        ind2_copies = [int(float(x)) for x in ind2.split('.')]
+
+        for c1 in ind1_copies:
+            for c2 in ind2_copies:
+                idx1, idx2 = sorted([c1, c2])
+                t = ca_times[idx1, idx2]
+                if t > 0 and t < tmrca:
+                    tmrca = ca_times[idx1, idx2]
+
+    elif isinstance(ind1, int) and isinstance(ind2, int):
         idx1, idx2 = sorted([ind1, ind2])
         tmrca = ca_times[idx1, idx2]
 
