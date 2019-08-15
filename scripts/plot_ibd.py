@@ -13,12 +13,22 @@ import functools
 from tqdm import tqdm
 
 
-def expected_num_segs(t, K, L):
-    return (K + 2 * L * t) / 2 ** (2 * t - 1)
+def expected_num_segs(t, K, L, diploid=False):
+    n = (K + 2 * L * t) / 2 ** (2 * t - 1)
+
+    if diploid:
+        n *= 2
+
+    return n
 
 
-def expected_total_length(t, L):
-    return L / 2 ** (2 * t - 1)
+def expected_total_length(t, L, diploid=False):
+    length = L / 2 ** (2 * t - 1)
+
+    if diploid:
+        length *= 2
+
+    return length
 
 
 def ibd_list_to_df(ibd_list, diploid=False):
@@ -57,16 +67,17 @@ def ibd_list_to_df(ibd_list, diploid=False):
     return df
 
 
-def plot_expected_ibd(max_ca_time, length_in_morgans, ax, K=22):
+def plot_expected_ibd(max_ca_time, length_in_morgans, ax, K=22, diploid=False):
     ## Get theory points
     K = 22
     L = length_in_morgans
     times = range(1, max_ca_time + 1)
 
-    expected_x = [expected_total_length(t, L) * 1e8 for t in times]
-    expected_y = [expected_num_segs(t, K, L) for t in times]
+    expected_x = [expected_total_length(t, L, diploid) * 1e8 for t in times]
+    expected_y = [expected_num_segs(t, K, L, diploid) for t in times]
 
-    ax.scatter(expected_x, expected_y, s=20, c='black', label='Expected')
+    ax.scatter(expected_x, expected_y, s=20, facecolors='white',
+            edgecolors='black', label='Expected')
 
 
 def get_tmrca(ind1, ind2, ca_times):
@@ -137,12 +148,11 @@ def plot_ibd_df(df, ca_times=None, min_length=1e6, ax=None, max_ca_time=10):
 
         ## We can have TMRCA of 0 if max_ca_time is different than the value used
         ## to generate the IBD array
-        if df2['tmrca'].min() == 0:
-            if warned is False:
-                print("Warning - filtering TMRCA >", max_ca_time)
-                warned = True
-                # import IPython; IPython.embed()
-            df2 = df2[df2['tmrca'] > 0]
+        # if df2['tmrca'].min() == 0:
+        #     if warned is False:
+        #         print("Warning - filtering TMRCA >", max_ca_time)
+        #         warned = True
+        #     df2 = df2[df2['tmrca'] > 0]
 
         num_segments = df2['count'].values
         total_IBD = df2['len'].values
@@ -210,9 +220,12 @@ def main(args):
     max_theory_ca_time = 5
     K = 22
     length_in_morgans = ts.get_sequence_length() / 1e8
-    plot_expected_ibd(max_theory_ca_time, length_in_morgans, ax=ax_arr[0], K=K)
-    plot_expected_ibd(max_theory_ca_time, length_in_morgans, ax=ax_arr[1], K=K)
-    plot_expected_ibd(max_theory_ca_time, length_in_morgans, ax=ax_arr[2], K=K)
+    plot_expected_ibd(max_theory_ca_time, length_in_morgans,
+            ax=ax_arr[0], K=K, diploid=diploid)
+    plot_expected_ibd(max_theory_ca_time, length_in_morgans,
+            ax=ax_arr[1], K=K, diploid=diploid)
+    plot_expected_ibd(max_theory_ca_time, length_in_morgans,
+            ax=ax_arr[2], K=K, diploid=diploid)
 
     ## Legend only on upper plot
     ax_arr[0].legend()
