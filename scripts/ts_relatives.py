@@ -1,11 +1,11 @@
 import sys, os
-sys.path.append(
-        os.path.expanduser('/home/dnelson/project/msprime/')
-        )
-sys.path.append(
-        os.path.expanduser('/home/dnelson/project/msprime/' +\
-                'lib/subprojects/git-submodules/tskit/python/')
-        )
+# sys.path.append(
+#         os.path.expanduser('/home/dnelson/project/msprime/')
+#         )
+# sys.path.append(
+#         os.path.expanduser('/home/dnelson/project/msprime/' +\
+#                 'lib/subprojects/git-submodules/tskit/python/')
+#         )
 import msprime
 import numpy as np
 import scipy.sparse
@@ -16,7 +16,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from tqdm import tqdm
 import argparse
-# from profilehooks import profile
+from datetime import datetime
 
 
 def get_positions_rates(chrom_lengths, rho):
@@ -194,15 +194,13 @@ class TSRelatives:
         clusters = defaultdict(set)
         
         ## If no clusters cross max_time, all nodes must be below max_time,
-        ## so everyone is IBD
+        ## so samples cluster by root node (everyone is IBD unless the
+        ## tree is not fully coalesced and has multiple roots)
         if len(ancs) == 0:
-            clusters[first_tree.get_root()] = set(first_tree.samples())
-            return clusters
+            ancs = first_tree.roots
         
         for a in ancs:
             clusters[a] = set(first_tree.get_leaves(a))
-
-        # print("Initial clusters:", clusters)
 
         return clusters
 
@@ -255,9 +253,8 @@ class TSRelatives:
         ## IBD starting at 0 is denoted by index 1.
         with tqdm(total=self.ts.num_trees, desc="Writing IBD pairs") as pbar:
             for i, (tree, diff) in enumerate(zip(trees, diffs)):
-                # if i == 1000:
+                # if i % 1000 == 0:
                 #     print("Num clusters:", len(clusters))
-                #     sys.exit()
                 for cluster in clusters.values():
                     ibd_pairs = combinations(sorted(cluster), 2)
                     for pair in ibd_pairs:
@@ -274,21 +271,22 @@ class TSRelatives:
                 pbar.update(1)
         
         ## TODO: Add last tree - integrate into main loop above
-            i += 1
-            for cluster in clusters.values():
-                ibd_pairs = combinations(sorted(cluster), 2)
-                for pair in ibd_pairs:
-                    ## Check if we are starting a new IBD segment
-                    ## or continuing one
-                    if ibd_end[pair] == i + 1:
-                        ibd_end[pair] += 1
-                    else:
-                        ## If we start a new segment, write the
-                        ## old one first
-                        self.write_ibd_pair(ibd_start, ibd_end, pair)
-                        ibd_start[pair] = i + 1
-                        ibd_end[pair] = i + 2
-            pbar.update(1)
+            if self.ts.num_trees > 1:
+                i += 1
+                for cluster in clusters.values():
+                    ibd_pairs = combinations(sorted(cluster), 2)
+                    for pair in ibd_pairs:
+                        ## Check if we are starting a new IBD segment
+                        ## or continuing one
+                        if ibd_end[pair] == i + 1:
+                            ibd_end[pair] += 1
+                        else:
+                            ## If we start a new segment, write the
+                            ## old one first
+                            self.write_ibd_pair(ibd_start, ibd_end, pair)
+                            ibd_start[pair] = i + 1
+                            ibd_end[pair] = i + 2
+                pbar.update(1)
 
         ## Write out all remaining segments, which reached the end of the
         ## simulated region
@@ -359,22 +357,22 @@ def ibd_list_to_df(ibd_list, ca_times=None):
     return df
     
 
-def simulate():
+def simulate(Ne, sample_size, max_time):
     rho = 1e-8
-    # chrom_lengths_morgans = [2.77693825, 2.633496065, 2.24483368, 
-	# 	2.12778391, 2.03765845, 1.929517394, 
-	# 	1.867959329, 1.701765192, 1.68073935, 
-	# 	1.789473882, 1.594854258, 1.72777271, 
-	# 	1.26940475, 1.16331251, 1.2554709, 
-	# 	1.348911043, 1.29292106, 1.18978483, 
-	# 	1.077960694, 1.079243479, 0.61526812, 
-	# 	0.72706815]
-    # chrom_lengths = [l * 1e8 for l in chrom_lengths_morgans]
+    chrom_lengths_morgans = [2.77693825, 2.633496065, 2.24483368, 
+		2.12778391, 2.03765845, 1.929517394, 
+		1.867959329, 1.701765192, 1.68073935, 
+		1.789473882, 1.594854258, 1.72777271, 
+		1.26940475, 1.16331251, 1.2554709, 
+		1.348911043, 1.29292106, 1.18978483, 
+		1.077960694, 1.079243479, 0.61526812, 
+		0.72706815]
+    chrom_lengths = [l * 1e8 for l in chrom_lengths_morgans]
 
-    chrom_lengths = [247249719, 242951149, 199501827, 191273063, 180857866,
-            170899992, 158821424, 146274826, 140273252, 135374737, 134452384,
-            132349534, 114142980, 106368585, 100338915, 88827254, 78774742,
-            76117153, 63811651, 62435964, 46944323, 49691432]
+    # chrom_lengths = [247249719, 242951149, 199501827, 191273063, 180857866,
+    #         170899992, 158821424, 146274826, 140273252, 135374737, 134452384,
+    #         132349534, 114142980, 106368585, 100338915, 88827254, 78774742,
+    #         76117153, 63811651, 62435964, 46944323, 49691432]
     num_loci = int(chrom_lengths[-1] + 1)
 
     positions, rates = get_positions_rates(chrom_lengths, rho)
@@ -382,14 +380,15 @@ def simulate():
             positions, rates, num_loci=num_loci
     )
     population_configuration = msprime.PopulationConfiguration(
-	sample_size=50,
-	initial_size=50
+	sample_size=sample_size,
+	initial_size=Ne
     )
 
     ts = msprime.simulate(
             population_configurations=[population_configuration],
             model='dtwf',
-            recombination_map=recombination_map
+            recombination_map=recombination_map,
+            end_time=max_time
             )
 
     return ts
@@ -415,25 +414,75 @@ def run_tsr(ts, max_time=10):
     return tsr
 
 
+def build_fname(label, ext, timestamp, args):
+    fname = timestamp + '_'
+    
+    if args.Ne and args.sample_size:
+        fname += 'Ne' + str(args.Ne) + '_'
+        fname += 'samplesize' + str(args.sample_size) + '_'
+        fname += 'maxtime' + str(args.max_time) + '_'
+
+    fname += label + '.' + ext
+    dirname = os.path.expanduser(args.output_dir)
+
+    return os.path.join(dirname, fname)
+
+
+def check_args(args):
+    if args.ts_file is None and (args.Ne is None or args.sample_size is None):
+        raise ValueError("Must specify either tree sequence file or both " +\
+                "Ne and sample size.")
+
+    if args.ts_file and (args.Ne or args.sample_size):
+        raise ValueError("Cannot specify both tree sequence file and " +\
+            "simulation parameters")
+
+    if args.plot is None and args.output_dir is None:
+        raise ValueError("Must specify at least one type of output!")
+
+
 def main(args):
-    tsr = TSRelatives(args.max_time, ts_file=args.ts_file)
+    check_args(args)
+    timestamp = datetime.strftime(datetime.now(), '%Y-%m-%d_%H-%M-%S')
+
+    ts_file = None
+    if args.ts_file:
+        ts_file = os.path.expanduser(args.ts_file)
+
+    ts = None
+    if args.Ne and args.sample_size:
+        ts = simulate(args.Ne, args.sample_size, max_time=args.max_time)
+        if args.output_dir:
+            ts_out_file = build_fname('ts', 'h5', timestamp, args)
+            ts.dump(ts_out_file)
+
+    tsr = TSRelatives(args.max_time, ts_file=ts_file, ts=ts)
     tsr.get_ibd()
     tsr.get_all_min_common_ancestor_times()
 
-    try:
+    if args.output_dir:
+        ibd_out_file = build_fname('ibd', 'npz', timestamp, args)
+        ibd_array = np.array(tsr.ibd_list)
+        np.savez_compressed(ibd_out_file, ibd_array=ibd_array)
+
+        ca_out_file = build_fname('ca_times', 'npz', timestamp, args)
+        scipy.sparse.save_npz(ca_out_file, tsr.ca_times.tocoo())
+
+    if args.plot:
+        plot_out_file = build_fname('plot_ibd', 'png', timestamp, args)
         plot_ibd(tsr.ibd_list, tsr.ca_times, min_length=args.min_length,
-                out_file=args.plot_out_file)
-    except:
-        print("Error!")
-        import IPython; IPython.embed()
+                out_file=plot_out_file)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('--ts_file', default='~/temp/')
-    parser.add_argument('--max_time', type=float, default=10)
-    parser.add_argument('--min_length', type=float, default=1e6)
-    parser.add_argument('--plot_out_file', default='~/temp/ibd_plot.png')
+    parser.add_argument('--ts_file')
+    parser.add_argument('--Ne', type=int)
+    parser.add_argument('--sample_size', type=int)
+    parser.add_argument('--max_time', type=int, default=5)
+    parser.add_argument('--min_length', type=float, default=5e6)
+    parser.add_argument('--output_dir')
+    parser.add_argument('--plot', action='store_true')
 
     args = parser.parse_args()
 
