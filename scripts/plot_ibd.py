@@ -175,7 +175,7 @@ def main(args):
     ts_file = os.path.expanduser(args.dtwf_ts_file)
     ts = msprime.load(ts_file)
 
-    diploid = not args.haploid
+    diploid = args.diploid
 
     ## Set up plot axes
     fig, ax_arr = plt.subplots(3, 1, figsize=(7, 7), sharex=True, sharey=True)
@@ -198,7 +198,8 @@ def main(args):
     loaded = np.load(ibd_file)
     ibd_array = loaded['ibd_array']
     ibd_df = ibd_list_to_df(ibd_array, diploid=diploid)
-    plot_ibd_df(ibd_df, ca_times_dtwf, ax=ax_arr[1])
+    plot_ibd_df(ibd_df, ca_times_dtwf, ax=ax_arr[1], min_length=args.min_length,
+            max_ca_time=args.max_ibd_time_gens)
     ax_arr[1].set_title('msprime (WF)')
 
     ## Get Hudson common ancestor times for IBD segments
@@ -213,7 +214,8 @@ def main(args):
     loaded = np.load(ibd_file)
     ibd_array = loaded['ibd_array']
     ibd_df = ibd_list_to_df(ibd_array, diploid=diploid)
-    plot_ibd_df(ibd_df, ca_times_hudson, ax=ax_arr[2])
+    plot_ibd_df(ibd_df, ca_times_hudson, ax=ax_arr[2], min_length=args.min_length,
+            max_ca_time=args.max_ibd_time_gens)
     ax_arr[2].set_title('msprime (Hudson)')
 
     ## Plot expected IBD cluster means
@@ -251,8 +253,9 @@ if __name__ == "__main__":
     parser.add_argument("--hudson_ts_file", required=True)
     parser.add_argument("--genizon_ibd_file", required=True)
     parser.add_argument("--outfile", required=True)
-    parser.add_argument("--haploid", action='store_true')
-    parser.add_argument("--max_ibd_time_gens", type=int, default=10)
+    parser.add_argument("--diploid", action='store_true')
+    parser.add_argument("--max_ibd_time_gens", type=int, default=5)
+    parser.add_argument('--min_length', type=float, default=5e6)
     args = parser.parse_args()
 
     main(args)

@@ -38,7 +38,7 @@ def get_positions_rates(chrom_lengths, rho):
 
 
 class TSRelatives:
-    def __init__(self, max_time, ts=None, ts_file=None):
+    def __init__(self, max_time, ts=None, ts_file=None, split_chroms=True):
         if ts is None and ts_file is None:
             print("One of ts or ts_file must be specified")
             raise ValueError
@@ -54,6 +54,10 @@ class TSRelatives:
         self.ca_last = scipy.sparse.lil_matrix((ts.num_samples, ts.num_samples))
         self.ca_count = scipy.sparse.lil_matrix((ts.num_samples, ts.num_samples))
         self.ibd_list = []
+
+        self.recombination_map = None
+        if split_chroms:
+            self.recombination_map = get_WG_recombination_map()
             
             
     def get_node_times(self):
@@ -160,6 +164,16 @@ class TSRelatives:
             
             start = self.bps[start_idx]
             end = self.bps[end_idx]
+
+            if self.recombination_map:
+                ## Splits IBD segment on chromosome boundaries, updating
+                ## start position so the last split is added as normal
+                for p in self.recombination_map.get_positions():
+                    if start < p < end:
+                        record = [ind1, ind2, start, p]
+                        self.ibd_list.append(record)
+                        start = p
+
             record = [ind1, ind2, start, end]
             self.ibd_list.append(record)
             
@@ -355,9 +369,9 @@ def ibd_list_to_df(ibd_list, ca_times=None):
                 )
     
     return df
-    
 
-def simulate(Ne, sample_size, max_time):
+
+def get_WG_recombination_map():
     rho = 1e-8
     chrom_lengths_morgans = [2.77693825, 2.633496065, 2.24483368, 
 		2.12778391, 2.03765845, 1.929517394, 
@@ -379,6 +393,13 @@ def simulate(Ne, sample_size, max_time):
     recombination_map = msprime.RecombinationMap(
             positions, rates, num_loci=num_loci
     )
+
+    return recombination_map
+    
+
+def simulate(Ne, sample_size, model, max_time):
+    max_time = max_time + 1e-9 # To include 'max_time' in node times
+    recombination_map = get_WG_recombination_map()
     population_configuration = msprime.PopulationConfiguration(
 	sample_size=sample_size,
 	initial_size=Ne
@@ -386,7 +407,7 @@ def simulate(Ne, sample_size, max_time):
 
     ts = msprime.simulate(
             population_configurations=[population_configuration],
-            model='dtwf',
+            model=model,
             recombination_map=recombination_map,
             end_time=max_time
             )
@@ -416,11 +437,12 @@ def run_tsr(ts, max_time=10):
 
 def build_fname(label, ext, timestamp, args):
     fname = timestamp + '_'
-    
-    if args.Ne and args.sample_size:
+
+    if args.Ne and args.sample_size and args.model:
         fname += 'Ne' + str(args.Ne) + '_'
         fname += 'samplesize' + str(args.sample_size) + '_'
         fname += 'maxtime' + str(args.max_time) + '_'
+        fname += 'model' + str(args.model).upper() + '_'
 
     fname += label + '.' + ext
     dirname = os.path.expanduser(args.output_dir)
@@ -429,11 +451,12 @@ def build_fname(label, ext, timestamp, args):
 
 
 def check_args(args):
-    if args.ts_file is None and (args.Ne is None or args.sample_size is None):
-        raise ValueError("Must specify either tree sequence file or both " +\
-                "Ne and sample size.")
+    if args.ts_file is None and (args.Ne is None or args.sample_size is None
+            or args.model is None):
+        raise ValueError("Must specify either tree sequence file or " +\
+                "Ne, sample size, and model type ('dtwf' or 'hudson').")
 
-    if args.ts_file and (args.Ne or args.sample_size):
+    if args.ts_file and (args.Ne or args.sample_size or args.model):
         raise ValueError("Cannot specify both tree sequence file and " +\
             "simulation parameters")
 
@@ -450,13 +473,15 @@ def main(args):
         ts_file = os.path.expanduser(args.ts_file)
 
     ts = None
-    if args.Ne and args.sample_size:
-        ts = simulate(args.Ne, args.sample_size, max_time=args.max_time)
+    if args.Ne and args.sample_size and args.model:
+        ts = simulate(args.Ne, args.sample_size, args.model,
+                max_time=args.max_time)
         if args.output_dir:
             ts_out_file = build_fname('ts', 'h5', timestamp, args)
             ts.dump(ts_out_file)
 
-    tsr = TSRelatives(args.max_time, ts_file=ts_file, ts=ts)
+    tsr = TSRelatives(args.max_time, ts_file=ts_file, ts=ts,
+            split_chroms=args.split_chroms)
     tsr.get_ibd()
     tsr.get_all_min_common_ancestor_times()
 
@@ -479,9 +504,11 @@ if __name__ == "__main__":
     parser.add_argument('--ts_file')
     parser.add_argument('--Ne', type=int)
     parser.add_argument('--sample_size', type=int)
+    parser.add_argument('--model', choices=['dtwf', 'hudson'])
     parser.add_argument('--max_time', type=int, default=5)
     parser.add_argument('--min_length', type=float, default=5e6)
     parser.add_argument('--output_dir')
+    parser.add_argument('--split_chroms', action='store_true')
     parser.add_argument('--plot', action='store_true')
 
     args = parser.parse_args()
