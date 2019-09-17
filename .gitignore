@@ -1,5 +1,5 @@
 results/
-scripts/.ipynb_checkpoints/
+scripts/jupyter/.ipynb_checkpoints/
 *.swp
 *.swo
 .qsub*
