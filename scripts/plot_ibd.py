@@ -176,17 +176,24 @@ def main(args):
     ts = msprime.load(ts_file)
 
     diploid = args.diploid
+    cur_subplot = 0
+    num_subplots = 2
+    if args.genizon_ibd_file:
+        num_subplots = 3
 
     ## Set up plot axes
-    fig, ax_arr = plt.subplots(3, 1, figsize=(7, 7), sharex=True, sharey=True)
+    fig, ax_arr = plt.subplots(num_subplots, 1, figsize=(7, 7), sharex=True,
+            sharey=True)
 
     ## Load Genizon IBD and plot
-    ibd_file = os.path.expanduser(args.genizon_ibd_file)
-    loaded = np.load(ibd_file)
-    ibd_array = loaded['ibd_array']
-    ibd_df = ibd_list_to_df(ibd_array, diploid=diploid)
-    plot_ibd_df(ibd_df, ax=ax_arr[0])
-    ax_arr[0].set_title('Genizon Data')
+    if args.genizon_ibd_file:
+        ibd_file = os.path.expanduser(args.genizon_ibd_file)
+        loaded = np.load(ibd_file)
+        ibd_array = loaded['ibd_array']
+        ibd_df = ibd_list_to_df(ibd_array, diploid=diploid)
+        plot_ibd_df(ibd_df, ax=ax_arr[0])
+        ax_arr[cur_subplot].set_title('Genizon Data')
+        cur_subplot += 1
 
     ## Get DTWF common ancestor times for IBD segments
     print("Loading DTWF")
@@ -198,9 +205,10 @@ def main(args):
     loaded = np.load(ibd_file)
     ibd_array = loaded['ibd_array']
     ibd_df = ibd_list_to_df(ibd_array, diploid=diploid)
-    plot_ibd_df(ibd_df, ca_times_dtwf, ax=ax_arr[1], min_length=args.min_length,
-            max_ca_time=args.max_ibd_time_gens)
-    ax_arr[1].set_title('msprime (WF)')
+    plot_ibd_df(ibd_df, ca_times_dtwf, ax=ax_arr[cur_subplot],
+            min_length=args.min_length, max_ca_time=args.max_ibd_time_gens)
+    ax_arr[cur_subplot].set_title('msprime (WF)')
+    cur_subplot += 1
 
     ## Get Hudson common ancestor times for IBD segments
     print("Loading Hudson")
@@ -214,20 +222,18 @@ def main(args):
     loaded = np.load(ibd_file)
     ibd_array = loaded['ibd_array']
     ibd_df = ibd_list_to_df(ibd_array, diploid=diploid)
-    plot_ibd_df(ibd_df, ca_times_hudson, ax=ax_arr[2], min_length=args.min_length,
-            max_ca_time=args.max_ibd_time_gens)
-    ax_arr[2].set_title('msprime (Hudson)')
+    plot_ibd_df(ibd_df, ca_times_hudson, ax=ax_arr[cur_subplot],
+            min_length=args.min_length, max_ca_time=args.max_ibd_time_gens)
+    ax_arr[cur_subplot].set_title('msprime (Hudson)')
+    cur_subplot += 1
 
     ## Plot expected IBD cluster means
     max_theory_ca_time = 5
     K = 22
     length_in_morgans = ts.get_sequence_length() / 1e8
-    plot_expected_ibd(max_theory_ca_time, length_in_morgans,
-            ax=ax_arr[0], K=K, diploid=diploid)
-    plot_expected_ibd(max_theory_ca_time, length_in_morgans,
-            ax=ax_arr[1], K=K, diploid=diploid)
-    plot_expected_ibd(max_theory_ca_time, length_in_morgans,
-            ax=ax_arr[2], K=K, diploid=diploid)
+    for i in range(num_subplots):
+        plot_expected_ibd(max_theory_ca_time, length_in_morgans,
+                ax=ax_arr[i], K=K, diploid=diploid)
 
     ## Legend only on upper plot
     ax_arr[0].legend()
@@ -251,7 +257,7 @@ if __name__ == "__main__":
     parser.add_argument("--hudson_ibd_file", required=True)
     parser.add_argument("--hudson_ca_file", required=True)
     parser.add_argument("--hudson_ts_file", required=True)
-    parser.add_argument("--genizon_ibd_file", required=True)
+    parser.add_argument("--genizon_ibd_file")
     parser.add_argument("--outfile", required=True)
     parser.add_argument("--diploid", action='store_true')
     parser.add_argument("--max_ibd_time_gens", type=int, default=5)
