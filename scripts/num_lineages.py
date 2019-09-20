@@ -94,16 +94,26 @@ def simulate_num_lineages(args):
             positions, rates, num_loci=num_loci
     )
 
-    demographic_events = None
+    demographic_events = []
     if args.min_pop_size is not None:
         time_to_min_pop_size = (np.log(Ne) - np.log(args.min_pop_size)) / growth_rate
-        if time_to_pop_size_100 > 0:
-            demographic_events = [
+        if time_to_min_pop_size > 0:
+            demographic_events.append(
                     msprime.PopulationParametersChange(
-                        time=time_to_pop_size_100,
+                        time=time_to_min_pop_size,
                         growth_rate=0
                         )
-                    ]
+                    )
+    if args.model.lower() == 'hybrid':
+        assert args.hybrid_switch_time is not None
+        model = 'dtwf'
+        demographic_events.append(
+                msprime.SimulationModelChange(
+                    time=args.hybrid_switch_time,
+                    model='hudson'
+                    )
+                )
+        demographic_events = sorted(demographic_events, key=lambda x: x.time)
 
     population_configurations = [
             msprime.PopulationConfiguration(
@@ -137,6 +147,7 @@ if __name__ == "__main__":
     parser.add_argument('--sample_size', default=50, type=int)
     parser.add_argument('--growth_rate', default=0.005, type=float)
     parser.add_argument('--model', default='Hudson')
+    parser.add_argument('--hybrid_switch_time', type=float)
     parser.add_argument('--nchroms', default=22, type=int)
     parser.add_argument('--srun', action="store_true")
     parser.add_argument('--mem', default="7000")
@@ -147,5 +158,16 @@ if __name__ == "__main__":
 
     if args.min_pop_size is not None:
         assert (args.min_pop_size <= args.Ne)
+
+    if args.model.lower() not in ['dtwf', 'hudson', 'hybrid']:
+        raise ValueError("Model must be one of ['dtwf', 'hudson', 'hybrid']")
+
+    if args.hybrid_switch_time is not None and args.model.lower() != 'hybrid':
+        raise ValueError("Must set '--model hybrid' if " +\
+                "hybrid_switch_time set")
+
+    if args.model.lower() == 'hybrid' and not args.hybrid_switch_time:
+        raise ValueError("Must specify '--hybrid_switch_time NGENS' for " +\
+                "hybrid model")
 
     main(args)

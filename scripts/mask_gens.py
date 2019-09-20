@@ -8,8 +8,8 @@ parser = argparse.ArgumentParser(
                 "generations in the past."
         )
 parser.add_argument("--global_step_size", type=float, default=1)
-parser.add_argument("--recent_step_size", type=float, default=0.01)
-parser.add_argument("--switch_time", type=float, default=100)
+parser.add_argument("--recent_step_size", type=float, default=0.001)
+parser.add_argument("--switch_time", type=float, default=20)
 args = parser.parse_args()
 
 time = 0
