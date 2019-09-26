@@ -12,6 +12,7 @@ import scipy.sparse
 from collections import defaultdict
 from itertools import combinations
 import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import pandas as pd
 from tqdm import tqdm
