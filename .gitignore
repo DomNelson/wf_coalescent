@@ -1,4 +1,5 @@
-results/
+results/*
+!results/figures
 scripts/jupyter/.ipynb_checkpoints/
 *.swp
 *.swo
