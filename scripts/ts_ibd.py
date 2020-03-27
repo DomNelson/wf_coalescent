@@ -1,124 +1,109 @@
 import sys, os
-sys.path.append('/home/dnelson/project/msprime/')
-sys.path.append('/home/dnelson/project/msprime/lib/subprojects/git-submodules/tskit/python/')
+# sys.path.append(
+#         os.path.expanduser('/home/dnelson/project/msprime/')
+#         )
+# sys.path.append(
+#         os.path.expanduser('/home/dnelson/project/msprime/' +\
+#                 'lib/subprojects/git-submodules/tskit/python/')
+#         )
 import msprime
 import numpy as np
 import scipy.sparse
 from collections import defaultdict
-import bisect
 from itertools import combinations
-import dask
-import sparse
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import pandas as pd
 from tqdm import tqdm
-from sortedcontainers import sortedlist
-import gc
-import weakref
-# from profilehooks import profile
+import argparse
+from datetime import datetime
 
 
-def expected_num_segs(t, K, L):
-    return (K + 2 * L * t) / 2 ** (2 * t - 1)
+def get_positions_rates(chrom_lengths, rho):
+    """
+    Takes a list of chromosome lengths and returns lists of positions and
+    rates to pass to msprime.RecombinationMap
+    """
+    positions = []
+    rates = []
+    total_length = 0
+    for length in chrom_lengths:
+        positions.extend([int(total_length), int(total_length) + int(length) - 1])
+        rates.extend([rho, 0.5])
+        total_length += length
 
+    rates[-1] = 0
 
-def expected_total_length(t, L):
-    return L / 2 ** (2 * t - 1)
+    return positions, rates
 
 
 class TSRelatives:
-    def __init__(self, max_time, ts=None, ts_file=None):
+    def __init__(self, max_time, ts=None, ts_file=None, split_chroms=True):
         if ts is None and ts_file is None:
             print("One of ts or ts_file must be specified")
             raise ValueError
-
+            
         if ts is None:
             ts = msprime.load(ts_file)
-
         self.ts = ts
-        self.max_time = max_time
-        self.bps = list(self.ts.breakpoints())
 
+        self.max_time = max_time
+        self.bps = list(ts.breakpoints())
         self.node_times = self.get_node_times()
         self.ca_times = scipy.sparse.lil_matrix((ts.num_samples, ts.num_samples))
         self.ca_last = scipy.sparse.lil_matrix((ts.num_samples, ts.num_samples))
         self.ca_count = scipy.sparse.lil_matrix((ts.num_samples, ts.num_samples))
         self.ibd_list = []
 
-
-    def list_edges(self, max_items=100):
-        edges = self.ts.edges()
-        edges_list = [n for i, n in enumerate(edges) if i < max_items]
-
-        return edges_list
-
-
-    def list_nodes(self, max_items=100):
-        nodes = self.ts.nodes()
-        nodes_list = [n for i, n in enumerate(nodes) if i < max_items]
-
-        return nodes_list
-
-
-    def draw_trees(self, first=0, last=5, locus=None, times=False):
-        node_labels = None
-        if locus is not None:
-            print("Searching for tree spanning position", locus, "- " +\
-                    "ignoring tree indices")
-            first = 0
-            last = self.ts.num_trees
-
-        trees = self.ts.trees()
-        for i, tree in enumerate(trees):
-            start, end = tree.get_interval()
-            if locus is not None:
-                if start > locus or end <= locus:
-                    continue
-
-            if i >= first and i < last:
-                if times is True:
-                    make_label = lambda n: str(n) + ': ' + str(self.node_times[n])
-                    node_labels = {n: make_label(n) for n in tree.nodes()}
-
-                ## TODO: This logic is pretty ugly
-                print("Interval:", start, "-", end)
-                print(tree.draw(format='unicode', node_labels=node_labels))
-                if locus is not None:
-                    break
-
-
+        self.recombination_map = None
+        if split_chroms:
+            self.recombination_map = get_WG_recombination_map()
+            
+            
     def get_node_times(self):
         node_times = {}
         for node in self.ts.nodes():
             node_times[node.id] = node.time
-
+            
         node_times[-1] = np.inf
 
         return node_times
+    
+    
+    def get_node_diff_candidates(self, diff):
+        """
+        Returns nodes which may have been added or removed
+        in the diff - will be involved in the most edge diffs
+        """
+        counts = defaultdict(int)
+        for edge in diff:
+            counts[edge.parent] += 1
+            counts[edge.child] += 1
+            
+        max_count = max(counts.values())            
+        out_candidates = [node for node, count in counts.items() if count == max_count]
 
-
+        return out_candidates
+            
+            
     def get_first_ancestor_below_max_time(self, tree, node):
         if self.node_times[node] > self.max_time:
             return -1
-
+        
         parent = tree.get_parent(node)
-        parent_time = self.node_times[parent]
         while parent >= 0:
+            parent_time = self.node_times[parent]
             if parent_time > self.max_time:
                 break
             node = parent
             parent = tree.get_parent(node)
-            parent_time = self.node_times[parent]
 
-        # print(node)
         assert self.node_times[node] <= self.max_time
-
         return node
 
 
-    def get_samples_below_edge_diff_conservative(self, tree, edge_diff):
+    def get_samples_below_edge_diff(self, tree, edge_diff):
         nodes = set()
         samples = set()
         segment, edges_in, edges_out = edge_diff
@@ -126,39 +111,21 @@ class TSRelatives:
 
         for edge in edges_in + edges_out:
             oldest_relevant_anc = self.get_first_ancestor_below_max_time(
-                    tree, edge.child)
+                    tree,
+                    edge.child
+                    )
             if oldest_relevant_anc >= 0:
                 nodes.add(oldest_relevant_anc)
 
-        oldest_change = 0
         for node in nodes:
-            node_time = self.node_times[node]
-            if node_time > oldest_change:
-                oldest_change = node_time
             samples.update(tree.get_leaves(node))
-
-        return list(samples), oldest_change
-
-
-    def get_samples_below_edge_diff(self, tree, edge_diff):
-        samples = set()
-        segment, edges_in, edges_out = edge_diff
-        assert type(edges_in) == list
-
-        oldest_change = 0
-        for edge in edges_in + edges_out:
-            node_time = self.node_times[edge.parent]
-            if node_time > oldest_change:
-                oldest_change = node_time
-            s = tree.get_leaves(edge.parent)
-            samples.update(s)
-
-        return list(samples), oldest_change
-
-
+            
+        return list(samples)
+    
+    
     def get_tree_min_common_ancestor_times(self, tree, edge_diff):
-        nodes_in_diff, _ = self.get_samples_below_edge_diff_conservative(tree, edge_diff)
-
+        nodes_in_diff = self.get_samples_below_edge_diff(tree, edge_diff)
+        
         for a, b in combinations(nodes_in_diff, 2):
             if a == b:
                 continue
@@ -173,122 +140,125 @@ class TSRelatives:
                 self.ca_times[a, b] = ca_time
                 self.ca_last[a, b] = ca
                 self.ca_count[a, b] = 1
-
+                
             elif ca_time == stored_time and self.ca_last[a, b] != ca:
                 ## Here we've found a second common ancestor from the same
                 ## generation as the first
                 self.ca_count[a, b] = 2
 
-
+                
     def get_all_min_common_ancestor_times(self):
         with tqdm(total=self.ts.num_trees) as pbar:
             for tree, edge_diff in zip(self.ts.trees(), self.ts.edge_diffs()):
                 self.get_tree_min_common_ancestor_times(tree, edge_diff)
                 pbar.update(1)
 
-
+                
     def write_ibd_pair(self, ibd_start, ibd_end, pair):
         if ibd_start[pair] != 0:
             assert ibd_end[pair] != 0
             ind1, ind2 = pair
-
+            
             ## Here we undo the offset we used when building segments
             start_idx = ibd_start[pair] - 1
             end_idx = ibd_end[pair] - 1
-
+            
             start = self.bps[start_idx]
             end = self.bps[end_idx]
+
+            if self.recombination_map:
+                ## Splits IBD segment on chromosome boundaries, updating
+                ## start position so the last split is added as normal
+                for p in self.recombination_map.get_positions():
+                    if start < p < end:
+                        record = [ind1, ind2, start, p]
+                        self.ibd_list.append(record)
+                        start = p
+
             record = [ind1, ind2, start, end]
             self.ibd_list.append(record)
-
+            
             ## Reset the pair for building the next segment
             ibd_start[pair] = 0
             ibd_end[pair] = 0
-
-
+            
+            
     def write_ibd_all(self, ibd_start, ibd_end):
         coo = ibd_start.tocoo()
         for ind1, ind2, start in zip(coo.row, coo.col, coo.data):
             pair = (ind1, ind2)
             self.write_ibd_pair(ibd_start, ibd_end, pair)
-
-
+            
+            
     def get_children_of_edges_crossing_max_time(self, locus=None):
-        children = []
+        children = set()
         for edge in self.ts.edges():
             if locus is not None and (edge.left > locus or edge.right <= locus):
                 continue
             parent_time = self.node_times[edge.parent]
             child_time = self.node_times[edge.child]
             if parent_time > self.max_time and child_time <= self.max_time:
-                children.append(edge.child)
-
+                # print("Adding", edge)
+                children.add(edge.child)
+                
         return children
-
+    
 
     def get_initial_clusters(self, first_tree):
-        # self.draw_trees(locus=0)
         ancs = self.get_children_of_edges_crossing_max_time(locus=0)
         clusters = defaultdict(set)
-
+        
         ## If no clusters cross max_time, all nodes must be below max_time,
-        ## so everyone is IBD
+        ## so samples cluster by root node (everyone is IBD unless the
+        ## tree is not fully coalesced and has multiple roots)
         if len(ancs) == 0:
-            clusters[first_tree.get_root()] = set(first_tree.samples())
-            return clusters
-
+            ancs = first_tree.roots
+        
         for a in ancs:
             clusters[a] = set(first_tree.get_leaves(a))
-
-        # print("Initial clusters:")
-        # print(clusters)
-
-        return clusters
-
-
-    def update_clusters(self, tree, diff, clusters):
-        changed_samples, oldest_time = self.get_samples_below_edge_diff(tree, diff)
-
-        ## First remove changed samples from existing clusters and update
-        ## oldest anc if necessary
-        ancs = list(clusters.keys())
-        num_updates = 0
-        for anc in ancs:
-
-            if self.node_times[anc] <= oldest_time:
-                ## These ancs may no longer be the closest to max_time
-                new_anc = self.get_first_ancestor_below_max_time(tree, anc)
-                cluster = clusters.pop(anc)
-                clusters[new_anc].update(cluster.difference(changed_samples))
-                num_updates += 1
-
-        ## Now add to new clusters
-        for sample in changed_samples:
-            anc = self.get_first_ancestor_below_max_time(tree, sample)
-            clusters[anc].add(sample)
-
-        ## Sanity check - no clusters should share samples
-        # for c1, c2 in combinations(new_clusters.values(), 2):
-        #     assert len(c1.intersection(c2)) == 0
-
-        # print(len(ancs), num_updates)
 
         return clusters
 
 
     # @profile
-    def get_ibd(self):
+    def update_clusters(self, tree, diff, clusters):
+        new_clusters = defaultdict(set)
+        changed_samples = self.get_samples_below_edge_diff(tree, diff)
+        # print("Changed samples:", len(changed_samples))
+        # print("Num clusters:", len(clusters))
+        
+        ## First remove changed samples from existing clusters and update
+        ## oldest anc if necessary
+        for anc, cluster in clusters.items():
+            if len(cluster) == 0:
+                continue
+            new_anc = self.get_first_ancestor_below_max_time(tree, anc)
+            new_clusters[new_anc].update(cluster.difference(changed_samples))
+            
+        ## Now add to new clusters
+        for sample in changed_samples:
+            anc = self.get_first_ancestor_below_max_time(tree, sample)
+            new_clusters[anc].add(sample)
+            
+        ## Sanity check - no clusters should share samples
+        # for c1, c2 in combinations(new_clusters.values(), 2):
+        #     assert len(c1.intersection(c2)) == 0
+
+        return new_clusters
+        
+                
+    def get_ibd(self):        
         n = self.ts.num_samples
         ibd_start = scipy.sparse.lil_matrix((n, n), dtype=int)
         ibd_end = scipy.sparse.lil_matrix((n, n), dtype=int)
-
+        
         ## Initialize with the first tree
         trees = self.ts.trees()
         diffs = self.ts.edge_diffs()
         first_tree = next(trees)
         first_diff = next(diffs)
         clusters = self.get_initial_clusters(first_tree)
-
+        
         ## NOTE 1: We compute the upper-triangular portion of the IBD
         ## matrix only. If a < b, IBD[b, a] == 0 does NOT imply no IBD
         ## shared, only IBD[a, b] is meaningful.
@@ -298,9 +268,9 @@ class TSRelatives:
         ## IBD starting at 0 is denoted by index 1.
         with tqdm(total=self.ts.num_trees, desc="Writing IBD pairs") as pbar:
             for i, (tree, diff) in enumerate(zip(trees, diffs)):
-#                 print(i)
+                # if i % 1000 == 0:
+                #     print("Num clusters:", len(clusters))
                 for cluster in clusters.values():
-#                     print(cluster)
                     ibd_pairs = combinations(sorted(cluster), 2)
                     for pair in ibd_pairs:
                         ## Check if we are starting a new IBD segment
@@ -314,206 +284,234 @@ class TSRelatives:
                             ibd_end[pair] = i + 2
                 clusters = self.update_clusters(tree, diff, clusters)
                 pbar.update(1)
-
+        
         ## TODO: Add last tree - integrate into main loop above
-            i += 1
-            # print(i)
-            for cluster in clusters.values():
-                # print(cluster)
-                ibd_pairs = combinations(sorted(cluster), 2)
-                for pair in ibd_pairs:
-                    ## Check if we are starting a new IBD segment
-                    ## or continuing one
-                    if ibd_end[pair] == i + 1:
-                        ibd_end[pair] += 1
-                    else:
-                        ## If we start a new segment, write the old one first
-                        self.write_ibd_pair(ibd_start, ibd_end, pair)
-                        ibd_start[pair] = i + 1
-                        ibd_end[pair] = i + 2
-            pbar.update(1)
+            if self.ts.num_trees > 1:
+                i += 1
+                for cluster in clusters.values():
+                    ibd_pairs = combinations(sorted(cluster), 2)
+                    for pair in ibd_pairs:
+                        ## Check if we are starting a new IBD segment
+                        ## or continuing one
+                        if ibd_end[pair] == i + 1:
+                            ibd_end[pair] += 1
+                        else:
+                            ## If we start a new segment, write the
+                            ## old one first
+                            self.write_ibd_pair(ibd_start, ibd_end, pair)
+                            ibd_start[pair] = i + 1
+                            ibd_end[pair] = i + 2
+                pbar.update(1)
 
         ## Write out all remaining segments, which reached the end of the
         ## simulated region
         self.write_ibd_all(ibd_start, ibd_end)
 
 
-def get_tree_spanning_locus(locus):
-    for t in ts.trees():
-        if t.get_interval()[0] > locus:
-            return tree
+def plot_ibd(ibd_list, ca_times=None, min_length=0, out_file=None):
+    print("Plotting!")
+    fig, ax = plt.subplots()
+    if out_file is None:
+        out_file = '~/temp/ibd_plot.png'
+    out_file = os.path.expanduser(out_file)
+	
+    cols = ["ind1", "ind2", "start", "end"]
+
+    ibd_df = pd.DataFrame(ibd_list, columns=cols)
+    ibd_df['len'] = ibd_df['end'] - ibd_df['start']
+    ibd_df = ibd_df[ibd_df['len'] >= min_length]
+    
+    ibd_df['count'] = 1
+    inds = set(ibd_df['ind1'].values)
+    for ind in inds:
+        ind_df = ibd_df[ibd_df['ind1'] == ind]
+        ind_pairwise_ibd_df = ind_df.groupby('ind2').sum()
+        ind_pairwise_ibd_df = ind_pairwise_ibd_df.reset_index()
+
+        total_IBD = ind_pairwise_ibd_df['len'].values
+        num_segments = ind_pairwise_ibd_df['count'].values
+        ind2 = ind_pairwise_ibd_df['ind2'].values
+        sizes = np.ones(total_IBD.shape[0]) * 8
+
+        colours = None
+        cmap = None
+        if ca_times is not None:
+            colours = []
+            for i in range(len(ind2)):
+                x, y = sorted([ind, ind2[i]])
+                assert(x <= y)
+                colours.append(ca_times[x, y])
+                if colours[-1] == 0:
+                    print(x, y)
+
+            colours = np.array(colours)
+            cmap = 'viridis'
+
+        ax.scatter(total_IBD, num_segments, s=sizes, c=colours, cmap=cmap)
+
+    ax.set_ylabel('Number of IBD segments')
+    ax.set_xlabel('Total IBD')
+    ax.set_xscale('log')
+    print("Saving...")
+    fig.savefig(out_file)
+    print("Done!")
 
 
 def ibd_list_to_df(ibd_list, ca_times=None):
     cols = ["ind1", "ind2", "start", "end"]
 
-    df = pd.DataFrame(np.array(ibd_list), columns=cols)
+    df = pd.DataFrame(np.array(tsr.ibd_list), columns=cols)
     df['len'] = df['end'] - df['start']
 
+    
+    if ca_times is not None:
+        df['tmrca'] = df[['ind1', 'ind2']].apply(
+                lambda x: tsr.ca_times[x['ind1'], x['ind2']], axis=1
+                )
+    
     return df
 
 
-def plot_expected_ibd(max_ca_time, length_in_morgans, ax, K=22):
-    ## Get theory points
-    K = 22
-    L = length_in_morgans
-    times = range(1, max_ca_time + 1)
+def get_WG_recombination_map():
+    rho = 1e-8
+    chrom_lengths_morgans = [2.77693825, 2.633496065, 2.24483368, 
+		2.12778391, 2.03765845, 1.929517394, 
+		1.867959329, 1.701765192, 1.68073935, 
+		1.789473882, 1.594854258, 1.72777271, 
+		1.26940475, 1.16331251, 1.2554709, 
+		1.348911043, 1.29292106, 1.18978483, 
+		1.077960694, 1.079243479, 0.61526812, 
+		0.72706815]
+    chrom_lengths = [l * 1e8 for l in chrom_lengths_morgans]
 
-    expected_x = [expected_total_length(t, L) * 1e8 for t in times]
-    expected_y = [expected_num_segs(t, K, L) for t in times]
+    # chrom_lengths = [247249719, 242951149, 199501827, 191273063, 180857866,
+    #         170899992, 158821424, 146274826, 140273252, 135374737, 134452384,
+    #         132349534, 114142980, 106368585, 100338915, 88827254, 78774742,
+    #         76117153, 63811651, 62435964, 46944323, 49691432]
+    num_loci = int(chrom_lengths[-1] + 1)
 
-    ax.scatter(expected_x, expected_y, s=20, c='darkgrey', label='Expected')
+    positions, rates = get_positions_rates(chrom_lengths, rho)
+    recombination_map = msprime.RecombinationMap(
+            positions, rates, num_loci=num_loci
+    )
 
+    return recombination_map
+    
 
-def plot_ibd_df(df, ca_times=None, min_length=1e6, ax=None, max_ca_time=10):
-    if ax is None:
-        fig, ax = plt.subplots(figsize=(8, 4))
+def simulate(Ne, sample_size, model, max_time):
+    max_time = max_time + 1e-9 # To include 'max_time' in node times
+    recombination_map = get_WG_recombination_map()
+    population_configuration = msprime.PopulationConfiguration(
+	sample_size=sample_size,
+	initial_size=Ne
+    )
 
-    df = df[df['len'] >= min_length]
+    ts = msprime.simulate(
+            population_configurations=[population_configuration],
+            model=model,
+            recombination_map=recombination_map,
+            end_time=max_time
+            )
 
-    df = df.assign(count=np.ones(df.shape[0]))
-    warned = False
-    for ind in set(df['ind1'].values):
-        ind_df = df[df['ind1'] == ind][['ind2', 'len', 'count']]
-        df2 = ind_df.groupby('ind2').sum()
-        df2 = df2.reset_index()
-
-        df2 = df2.assign(colours=np.zeros(df2.shape[0]))
-        if ca_times is not None:
-            get_ca_time = lambda x: ca_times[sorted([ind, x])[0], sorted([ind, x])[1]]
-            df2 = df2.assign(
-                    tmrca=df2['ind2'].apply(get_ca_time), axis=1
-                    )
-
-        df2 = df2[df2['tmrca'] <= max_ca_time]
-
-        ## We can have TMRCA of 0 if max_ca_time is different than the value used
-        ## to generate the IBD array
-        if df2['tmrca'].min() == 0:
-            if warned is False:
-                print("Warning - filtering TMRCA >", max_ca_time)
-                warned = True
-            df2 = df2[df2['tmrca'] > 0]
-
-        num_segments = df2['count'].values
-        total_IBD = df2['len'].values
-        colours = df2['tmrca'].values
-
-        ax.scatter(total_IBD, num_segments, c=colours, s=5,
-                cmap='viridis', vmin=0, vmax=max_ca_time)
-
-    ax.set_ylabel('Number of IBD segments')
-    ax.set_xlabel('')
-    if ax.is_last_row():
-        ax.set_xlabel('Total IBD')
-    ax.set_xscale('log')
-    ax.set_xlim((0.7 * min_length, 4e9))
-
-    return ax
+    return ts
 
 
-def paper_IBD_chrom_boundaries():
-    chrom_boundaries = [
-	    2489957506,
-	    2401130252,
-	    880975757,
-	    1061833623,
-	    490200867,
-	    689702694,
-	    2300791337,
-	    1232733615,
-	    247249718,
-	    2771097016,
-	    2708661052,
-	    1678103117,
-	    2568732248,
-	    2080279772,
-	    1813477854,
-	    1391555039,
-	    2194422752,
-	    1537829865,
-	    2644849401,
-	    2818041339,
-	    1947930238]
+def load_triple_merger():
+    fname = 'test/test_data/small_triple_merger.h5'
+    print("A good max_time is 16")
 
-    return chrom_boundaries
+    return msprime.load(fname)
 
 
-def paper_plot():
-    ts_file = os.path.expanduser('~/project/wf_coalescent/results/' +\
-            'IBD/Ne500_samples500_WG_ts_dtwf.h5')
-    ts = msprime.load(ts_file)
-    max_ibd_time_gens = 10
+def draw_trees(ts):
+    for t in ts.trees():
+        print(t.draw(format='unicode'))
 
-    ## Set up plot axes
-    fig, ax_arr = plt.subplots(2, 1, figsize=(7, 7), sharex=True, sharey=True)
 
-    ## Get DTWF common ancestor times for IBD segments
-    print("Loading DTWF")
-    T_dtwf = TSRelatives(max_ibd_time_gens, ts)
-    T_dtwf.get_all_min_common_ancestor_times()
-    # T_dtwf.get_ibd()
+def run_tsr(ts, max_time=10):
+    tsr = TSRelatives(max_time, ts)
+    tsr.get_all_min_common_ancestor_times()
+    tsr.get_ibd()
 
-    ## Load DTWF IBD and plot
-    ibd_file = os.path.expanduser('~/project/wf_coalescent/results/' +\
-            'IBD/Ne500_samples500_WG_dtwf.npz')
-    loaded = np.load(ibd_file)
-    ibd_array = loaded['ibd_array']
-    ibd_df = ibd_list_to_df(ibd_array)
-    plot_ibd_df(ibd_df, T_dtwf.ca_times, ax=ax_arr[0])
-    ax_arr[0].set_title('msprime (WF)')
+    return tsr
 
-    ## Get Hudson common ancestor times for IBD segments
-    print("Loading Hudson")
-    ts_file = os.path.expanduser('~/project/wf_coalescent/results/' +\
-            'IBD/Ne500_samples500_WG_ts_hudson.h5')
-    ts = msprime.load(ts_file)
-    T_hudson = TSRelatives(max_ibd_time_gens, ts)
-    T_hudson.get_all_min_common_ancestor_times()
 
-    ## Load Hudson IBD and plot
-    ibd_file = os.path.expanduser('~/project/wf_coalescent/results/' +\
-            'IBD/Ne500_samples500_WG_hudson.npz')
-    loaded = np.load(ibd_file)
-    ibd_array = loaded['ibd_array']
-    ibd_df = ibd_list_to_df(ibd_array)
-    plot_ibd_df(ibd_df, T_hudson.ca_times, ax=ax_arr[1])
-    ax_arr[1].set_title('msprime (Hudson)')
+def build_fname(label, ext, timestamp, args):
+    fname = timestamp + '_'
 
-    ## Plot expected IBD cluster means
-    max_theory_ca_time = 5
-    K = 22
-    length_in_morgans = ts.get_sequence_length() / 1e8
-    plot_expected_ibd(max_theory_ca_time, length_in_morgans, ax=ax_arr[0], K=K)
-    plot_expected_ibd(max_theory_ca_time, length_in_morgans, ax=ax_arr[1], K=K)
+    if args.Ne and args.sample_size and args.model:
+        fname += 'Ne' + str(args.Ne) + '_'
+        fname += 'samplesize' + str(args.sample_size) + '_'
+        fname += 'maxtime' + str(args.max_time) + '_'
+        fname += 'model' + str(args.model).upper() + '_'
 
-    ## Legend only on upper plot
-    ax_arr[0].legend()
+    fname += label + '.' + ext
+    dirname = os.path.expanduser(args.output_dir)
 
-    ## Jump through a few hoops to set colourbars
-    sm = plt.cm.ScalarMappable(cmap='viridis',
-            norm=plt.Normalize(vmin=0, vmax=max_ibd_time_gens))
-    sm._A = []
+    return os.path.join(dirname, fname)
 
-    # for ax in ax_arr:
-    # cbar_ax = fig.add_axes([0.85, 0.15, 0.05, 0.7])
-    # cbar = fig.colorbar(sm, cax=cbar_ax)
-    cbar = fig.colorbar(sm, aspect=50, ax=ax_arr.ravel().tolist())
-    cbar.ax.get_yaxis().labelpad = 5
-    cbar.ax.set_ylabel('TMRCA', rotation=90)
 
-    return T_dtwf, T_hudson, fig, ax_arr
+def check_args(args):
+    if args.ts_file is None and (args.Ne is None or args.sample_size is None
+            or args.model is None):
+        raise ValueError("Must specify either tree sequence file or " +\
+                "Ne, sample size, and model type ('dtwf' or 'hudson').")
+
+    if args.ts_file and (args.Ne or args.sample_size or args.model):
+        raise ValueError("Cannot specify both tree sequence file and " +\
+            "simulation parameters")
+
+    if args.plot is None and args.output_dir is None:
+        raise ValueError("Must specify at least one type of output!")
+
+
+def main(args):
+    check_args(args)
+    timestamp = datetime.strftime(datetime.now(), '%Y-%m-%d_%H-%M-%S')
+
+    ts_file = None
+    if args.ts_file:
+        ts_file = os.path.expanduser(args.ts_file)
+
+    ts = None
+    if args.Ne and args.sample_size and args.model:
+        ts = simulate(args.Ne, args.sample_size, args.model,
+                max_time=args.max_time)
+        if args.output_dir:
+            ts_out_file = build_fname('ts', 'h5', timestamp, args)
+            ts.dump(ts_out_file)
+
+    tsr = TSRelatives(args.max_time, ts_file=ts_file, ts=ts,
+            split_chroms=args.split_chroms)
+    tsr.get_ibd()
+    tsr.get_all_min_common_ancestor_times()
+
+    if args.output_dir:
+        ibd_out_file = build_fname('ibd', 'npz', timestamp, args)
+        ibd_array = np.array(tsr.ibd_list)
+        np.savez_compressed(ibd_out_file, ibd_array=ibd_array)
+
+        ca_out_file = build_fname('ca_times', 'npz', timestamp, args)
+        scipy.sparse.save_npz(ca_out_file, tsr.ca_times.tocoo())
+
+    if args.plot:
+        plot_out_file = build_fname('plot_ibd', 'png', timestamp, args)
+        plot_ibd(tsr.ibd_list, tsr.ca_times, min_length=args.min_length,
+                out_file=plot_out_file)
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        print("Usage: python ts_ibd.py paper_plot_outfile")
-        sys.exit()
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--ts_file')
+    parser.add_argument('--Ne', type=int)
+    parser.add_argument('--sample_size', type=int)
+    parser.add_argument('--model', choices=['dtwf', 'hudson'])
+    parser.add_argument('--max_time', type=int, default=5)
+    parser.add_argument('--min_length', type=float, default=5e6)
+    parser.add_argument('--output_dir')
+    parser.add_argument('--split_chroms', action='store_true')
+    parser.add_argument('--plot', action='store_true')
 
-    outfile = os.path.expanduser(sys.argv[1])
+    args = parser.parse_args()
 
-    T_dtwf, T_hudson, fig, ax_arr = paper_plot()
-
-    fig.savefig(outfile)
-
-    import IPython; IPython.embed()
+    main(args)
