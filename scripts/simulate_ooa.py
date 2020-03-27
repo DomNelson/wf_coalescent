@@ -202,7 +202,7 @@ def out_of_africa_msprime(nhaps):
     return(population_configurations, migration_matrix, demographic_events)
 
 
-def simulate_ooa(population_configurations, migration_matrix, demographic_events, recomb_map, models):
+def simulate_ooa(population_configurations, migration_matrix, demographic_events, recomb_map, models, end_time=None):
     """
     simulate according to the specified demographic model with recombination
     """
@@ -215,7 +215,8 @@ def simulate_ooa(population_configurations, migration_matrix, demographic_events
             demographic_events=demographic_events,
             model=model,
             mutation_rate=2e-8,
-            recombination_map=recomb_map
+            recombination_map=recomb_map,
+            end_time=end_time,
         )
         eprint('Ending simulations' + current_time())
 
@@ -225,8 +226,10 @@ def simulate_ooa(population_configurations, migration_matrix, demographic_events
 
 
 if __name__ == "__main__":
-    # num_chroms = 1
-    num_chroms = 22
+    num_chroms = 1
+    # num_chroms = 22
+    end_time = None
+    # end_time = 5 + 1e-9
     # nhaps = [1, 1, 0]
     nhaps = [1000, 1000, 1000]
     positions, rates, num_loci = get_whole_genome_positions_rates_loci(
@@ -234,11 +237,11 @@ if __name__ == "__main__":
     recomb_map = msprime.RecombinationMap(
             positions, rates, num_loci=num_loci)
     # models = ['dtwf']
-    models = ['hudson']
-    # models = ['dtwf', 'hudson']
+    # models = ['hudson']
+    models = ['dtwf', 'hudson']
 
     (pop_config, mig_mat, demog) = out_of_africa_msprime(nhaps)
-    simulations = simulate_ooa(pop_config, mig_mat, demog, recomb_map, models)
+    simulations = simulate_ooa(pop_config, mig_mat, demog, recomb_map, models, end_time)
 
     for sim, model in zip(simulations, models):
         sim.dump(os.path.expanduser('./ooa_') + model + \

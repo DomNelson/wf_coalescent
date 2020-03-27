@@ -31,53 +31,117 @@ def expected_total_length(t, L, diploid=False):
     return length
 
 
-def ibd_list_to_df(ibd_list, diploid=False):
+def ibd_list_to_df(ibd_list, diploid=False, germline=False):
     ibd_array = np.array(ibd_list)
     cols = ["ind1", "ind2", "start", "end"]
     df = pd.DataFrame(ibd_array, columns=cols)
     df['len'] = df['end'] - df['start']
 
     if diploid is True:
-        inds = list(set(ibd_array[:, 0:2].ravel()))
-        np.random.shuffle(inds)
 
-        # Get even number of inds and pair randomly
-        diploid_dict = {}
-        extra_haploids = len(inds) % 2
-        for i in np.arange(0, len(inds) - extra_haploids, 2):
-            ind1 = inds[i]
-            ind2 = inds[i+1]
-            # Convert GERMLINE decimal copy numbers to integer IDs
-            if ind1 != int(ind1):
-                ind1 = ind1 * 10
-            if ind2 != int(ind2):
-                ind2 = ind2 * 10
-            assert ind1 == int(ind1) and ind2 == int(ind2)
-            ind1 = int(ind1)
-            ind2 = int(ind2)
+        if germline:
+            contains_decimal = False
+            print("Unphasing GERMLINE data")
+            for i in tqdm(range(ibd_array.shape[0])):
+                for j in range(2):
+                    # Weak check that decimal copy numbers are present
+                    ind = ibd_array[i, j]
+                    if ind != int(ind):
+                        contains_decimal = True
 
-            diploid_ind = float("{}.{}".format(ind1, ind2))
-            diploid_dict[ind1] = diploid_ind
-            diploid_dict[ind2] = diploid_ind
+                    # Strip GERMLINE decimal copy numbers to form diploid IDs
+                    ibd_array[i, j] = int(ind)
 
-        df[['ind1', 'ind2']] = df[['ind1', 'ind2']].replace(
-                to_replace=diploid_dict)
+            if not contains_decimal:
+                raise ValueError("GERMLINE decimal copy numbers not found!")
+
+            ## Messy but we just rebuild the dataframe with the new diploid IDs
+            df = pd.DataFrame(ibd_array, columns=cols)
+            df['len'] = df['end'] - df['start']
+
+        else:
+            print("Merging simulated haploids into unphased diploid")
+            inds = list(set(ibd_array[:, 0:2].ravel()))
+            np.random.shuffle(inds)
+
+            # Get even number of inds and pair randomly
+            diploid_dict = {}
+            extra_haploids = len(inds) % 2
+            for i in np.arange(0, len(inds) - extra_haploids, 2):
+                ind1 = inds[i]
+                ind2 = inds[i+1]
+                assert ind1 == int(ind1)
+                assert ind2 == int(ind2)
+                ind1 = int(ind1)
+                ind2 = int(ind2)
+
+                diploid_ind = float("{}.{}".format(ind1, ind2))
+                diploid_dict[ind1] = diploid_ind
+                diploid_dict[ind2] = diploid_ind
+
+            df[['ind1', 'ind2']] = df[['ind1', 'ind2']].replace(
+                    to_replace=diploid_dict)
 
     # import IPython; IPython.embed()
     return df
 
 
-def plot_expected_ibd(max_ca_time, length_in_morgans, ax, K=22, diploid=False):
+def get_labels(times, diploid):
+    labels_dict = {1: 'Half siblings', 2: 'Half-first cousins',
+            3: 'Half-second cousins'}
+    if diploid is True:
+        labels_dict = {2: 'First cousins', 3: 'Second cousins'}
+    
+    labels = [labels_dict[t] for t in times if t in labels_dict]
+
+    return labels
+
+
+def plot_expected_ibd(max_ca_time, length_in_morgans, ax, K=22,
+        diploid=False, avuncular=False, grandparental=False, min_ca_time=1,
+        label_points=False):
     ## Get theory points
     K = 22
     L = length_in_morgans
-    times = range(1, max_ca_time + 1)
+    times = range(min_ca_time, max_ca_time + 1)
 
     expected_x = [expected_total_length(t, L, diploid) * 1e8 for t in times]
     expected_y = [expected_num_segs(t, K, L, diploid) for t in times]
 
+    labels = get_labels(times, diploid)
+    for l, x, y in zip(labels, expected_x, expected_y):
+        if label_points:
+            ax.annotate(l, xy=(x, y), xytext=(-25, 25),
+                    textcoords='offset points', ha='right', va='bottom',
+                    arrowprops=dict(arrowstyle = '-', connectionstyle='arc3,rad=0'),
+                    fontsize=10)
+
+    if avuncular:
+        x = (L / 2) * 1e8
+        y = (K + 3 * L) / 2
+        if label_points:
+            ax.annotate('Avuncular', xy=(x, y), xytext=(-30, 25),
+                    textcoords='offset points', ha='right', va='bottom',
+                    arrowprops=dict(arrowstyle = '-', connectionstyle='arc3,rad=0'))
+        expected_x.append(x)
+        expected_y.append(y)
+
+    if grandparental:
+        x = (L / 2) * 1e8
+        y = (K + 2 * L) / 2
+        if label_points:
+            ax.annotate('Grandparent / grandchild', xy=(x, y), xytext=(35, -58),
+                    textcoords='offset points', ha='right', va='bottom',
+                    arrowprops=dict(arrowstyle = '-', connectionstyle='arc3,rad=0'))
+        expected_x.append(x)
+        expected_y.append(y)
+
+    label = 'Expected (non-monogamous)'
+    if diploid:
+        label = 'Expected (monogamous)'
+
     ax.scatter(expected_x, expected_y, s=20, facecolors='white',
-            edgecolors='black', label='Expected')
+            edgecolors='black', label=label)
 
 
 def get_tmrca(ind1, ind2, ca_times):
@@ -175,7 +239,7 @@ def main(args):
     ts_file = os.path.expanduser(args.dtwf_ts_file)
     ts = msprime.load(ts_file)
 
-    diploid = args.diploid
+    # diploid = args.diploid
     cur_subplot = 0
     num_subplots = 2
     if args.genizon_ibd_file:
@@ -186,11 +250,12 @@ def main(args):
             sharey=True)
 
     ## Load Genizon IBD and plot
+    print("Loading Genizen data")
     if args.genizon_ibd_file:
         ibd_file = os.path.expanduser(args.genizon_ibd_file)
         loaded = np.load(ibd_file)
         ibd_array = loaded['ibd_array']
-        ibd_df = ibd_list_to_df(ibd_array, diploid=diploid)
+        ibd_df = ibd_list_to_df(ibd_array, diploid=True, germline=True)
         plot_ibd_df(ibd_df, ax=ax_arr[0])
         ax_arr[cur_subplot].set_title('Genizon Data')
         cur_subplot += 1
@@ -204,7 +269,7 @@ def main(args):
     ibd_file = os.path.expanduser(args.dtwf_ibd_file)
     loaded = np.load(ibd_file)
     ibd_array = loaded['ibd_array']
-    ibd_df = ibd_list_to_df(ibd_array, diploid=diploid)
+    ibd_df = ibd_list_to_df(ibd_array, diploid=False)
     plot_ibd_df(ibd_df, ca_times_dtwf, ax=ax_arr[cur_subplot],
             min_length=args.min_length, max_ca_time=args.max_ibd_time_gens)
     ax_arr[cur_subplot].set_title('msprime (WF)')
@@ -221,7 +286,7 @@ def main(args):
     ibd_file = os.path.expanduser(args.hudson_ibd_file)
     loaded = np.load(ibd_file)
     ibd_array = loaded['ibd_array']
-    ibd_df = ibd_list_to_df(ibd_array, diploid=diploid)
+    ibd_df = ibd_list_to_df(ibd_array, diploid=False)
     plot_ibd_df(ibd_df, ca_times_hudson, ax=ax_arr[cur_subplot],
             min_length=args.min_length, max_ca_time=args.max_ibd_time_gens)
     ax_arr[cur_subplot].set_title('msprime (Hudson)')
@@ -231,12 +296,19 @@ def main(args):
     max_theory_ca_time = 5
     K = 22
     length_in_morgans = ts.get_sequence_length() / 1e8
-    for i in range(num_subplots):
-        plot_expected_ibd(max_theory_ca_time, length_in_morgans,
-                ax=ax_arr[i], K=K, diploid=diploid)
+
+    plot_expected_ibd(max_theory_ca_time, length_in_morgans, ax=ax_arr[0],
+            K=K, diploid=True, avuncular=True, grandparental=True, min_ca_time=2,
+            label_points=True)
+    plot_expected_ibd(max_theory_ca_time, length_in_morgans, ax=ax_arr[1],
+            K=K, diploid=False, label_points=True)
+    plot_expected_ibd(max_theory_ca_time, length_in_morgans, ax=ax_arr[2],
+            K=K, diploid=False, label_points=False)
 
     ## Legend only on upper plot
-    ax_arr[0].legend()
+    ax_arr[0].legend(loc='upper left')
+    ax_arr[1].legend(loc='upper left')
+    ax_arr[2].legend(loc='upper left')
 
     ## Jump through a few hoops to set colourbars
     sm = plt.cm.ScalarMappable(cmap='viridis',
@@ -246,7 +318,13 @@ def main(args):
     cbar.ax.get_yaxis().labelpad = 5
     cbar.ax.set_ylabel('TMRCA (generations)', rotation=90)
 
-    fig.savefig(os.path.expanduser(args.outfile))
+    try:
+        fig.savefig(os.path.expanduser(args.outfile), dpi=600)
+        print("Plotted at high dpi")
+    except:
+        fig.savefig(os.path.expanduser(args.outfile))
+        print("Failed to plot at high dpi - falling back to default")
+
 
 
 if __name__ == "__main__":
@@ -259,7 +337,7 @@ if __name__ == "__main__":
     parser.add_argument("--hudson_ts_file", required=True)
     parser.add_argument("--genizon_ibd_file")
     parser.add_argument("--outfile", required=True)
-    parser.add_argument("--diploid", action='store_true')
+    # parser.add_argument("--diploid", action='store_true')
     parser.add_argument("--max_ibd_time_gens", type=int, default=5)
     parser.add_argument('--min_length', type=float, default=5e6)
     args = parser.parse_args()

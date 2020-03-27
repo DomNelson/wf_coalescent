@@ -15,7 +15,7 @@ class IBDtoGraph:
         assert not (ibd_file and ibd_array)
         assert (ibd_file or ibd_array)
         
-        self.total_ibd_array = None
+        self.pairwise_total_ibd_array = None
         self.ninds = None
         self.pos = None
         self.graph_params = None
@@ -31,18 +31,26 @@ class IBDtoGraph:
         self.inds = list(set(self.ibd_df[['ind1', 'ind2']].values.astype(int).ravel()))
         self.ninds = max(self.inds)
         
-    def get_pairwise_total_length(self, maxrows=None):
-        self.total_ibd_array = scipy.sparse.lil_matrix((self.ninds + 1, self.ninds + 1))
+    def set_pairwise_total_IBD(self, maxrows=None, input_file=None, output_file=None):
+        self.pairwise_total_ibd_array = scipy.sparse.lil_matrix((self.ninds + 1, self.ninds + 1))
+
+        if input_file:
+            assert output_file is not None
+            self.pairwise_total_ibd_array = scipy.sparse.load_npz(input_file).tolil()
+            return
         
         for i, row in tqdm(self.ibd_df.iterrows(), total=self.ibd_df.shape[0]):
             ind1, ind2 = sorted([int(row.ind1), int(row.ind2)])
-            self.total_ibd_array[ind1, ind2] += row.len
+            self.pairwise_total_ibd_array[ind1, ind2] += row.len
             if maxrows is not None and i > maxrows:
                 break
+
+        if output_file:
+            scipy.sparse.save_npz(output_file, self.pairwise_total_ibd_array.tocoo())
                 
     def build_graph(self, k=None, iterations=None, outfile=None):
         G = nx.Graph()
-        coo = self.total_ibd_array.tocoo()
+        coo = self.pairwise_total_ibd_array.tocoo()
         max_len = coo.data.max()
         for r, c, d in zip(coo.row, coo.col, coo.data):
             G.add_edge(r, c, weight=d / max_len)
@@ -78,8 +86,17 @@ def main(args):
     ibd_file = os.path.expanduser(args.ibd_file)
     plot_file = os.path.expanduser(args.plot_file)
 
+    pairwise_total_ibd_input = None
+    if args.pairwise_total_ibd_input:
+        pairwise_total_ibd_input = os.path.expanduser(args.pairwise_total_ibd_input)
+
+    pairwise_total_ibd_output = None
+    if args.pairwise_total_ibd_output:
+        pairwise_total_ibd_output = os.path.expanduser(args.pairwise_total_ibd_output)
+
     I = IBDtoGraph(ibd_file=ibd_file)
-    I.get_pairwise_total_length(maxrows=args.max_rows)
+    I.set_pairwise_total_IBD(maxrows=args.max_rows, input_file=pairwise_total_ibd_input,
+            output_file=pairwise_total_ibd_output)
     I.build_graph(iterations=args.iterations, k=args.point_spread)
     I.plot_graph(alpha=args.plot_alpha, outfile=plot_file)
 
@@ -88,6 +105,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("-i", "--ibd_file", required=True)
     parser.add_argument("-o", "--plot_file", required=True)
+    parser.add_argument("-p", "--pairwise_total_ibd_input")
+    parser.add_argument("-s", "--pairwise_total_ibd_output")
     parser.add_argument("-a", "--plot_alpha", type=float, default=0.5)
     parser.add_argument("-m", "--max_rows", type=int)
     parser.add_argument("-k", "--point_spread", type=float)
