@@ -16,9 +16,9 @@ import datetime
 # from cycler import cycler
 # mpl.rcParams['axes.prop_cycle'] = cycler(color='bgrcmyk')
 
-msprime_dir = os.path.expanduser('~/project/msprime')
-sys.path.append(msprime_dir)
-sys.path.append(msprime_dir + '/lib/subprojects/git-submodules/tskit/python')
+# msprime_dir = os.path.expanduser('~/project/msprime')
+# sys.path.append(msprime_dir)
+# sys.path.append(msprime_dir + '/lib/subprojects/git-submodules/tskit/python')
 import msprime
 
 @attr.s(auto_attribs=True)
@@ -41,12 +41,25 @@ class PerformanceComparison:
     _temp_hybrid_wf_gens: int = attr.ib(init=False, default=-1)
 
     ## Lengths from GRCh38.p12
+    # chrom_lengths: typing.List[float] = [
+	#     248956422, 242193529, 198295559, 190214555, 181538259,
+	#     170805979, 159345973, 145138636, 138394717, 133797422,
+	#     135086622, 133275309, 114364328, 107043718, 101991189,
+	#     90338345, 83257441, 80373285, 58617616, 64444167,
+	#     46709983, 50818468]
+    ## Lengths from Gravel 2012, convert to base pairs
     chrom_lengths: typing.List[float] = [
-	    248956422, 242193529, 198295559, 190214555, 181538259,
-	    170805979, 159345973, 145138636, 138394717, 133797422,
-	    135086622, 133275309, 114364328, 107043718, 101991189,
-	    90338345, 83257441, 80373285, 58617616, 64444167,
-	    46709983, 50818468]
+            length * 1e8 for length in [
+                2.77693825, 2.633496065, 2.24483368, 
+		2.12778391, 2.03765845, 1.929517394, 
+		1.867959329, 1.701765192, 1.68073935, 
+		1.789473882, 1.594854258, 1.72777271, 
+		1.26940475, 1.16331251, 1.2554709, 
+		1.348911043, 1.29292106, 1.18978483, 
+		1.077960694, 1.079243479, 0.61526812, 
+		0.72706815]
+            ]
+
 
     ## Complicated way of defining uninitialized empty collections
     simulated_lengths: typing.List[float] = attr.ib(
