@@ -1,11 +1,4 @@
 import sys, os
-# sys.path.append(
-#         os.path.expanduser('/home/dnelson/project/msprime/')
-#         )
-# sys.path.append(
-#         os.path.expanduser('/home/dnelson/project/msprime/' +\
-#                 'lib/subprojects/git-submodules/tskit/python/')
-#         )
 import msprime
 import numpy as np
 import scipy.sparse
@@ -71,22 +64,6 @@ class TSRelatives:
         return node_times
     
     
-    def get_node_diff_candidates(self, diff):
-        """
-        Returns nodes which may have been added or removed
-        in the diff - will be involved in the most edge diffs
-        """
-        counts = defaultdict(int)
-        for edge in diff:
-            counts[edge.parent] += 1
-            counts[edge.child] += 1
-            
-        max_count = max(counts.values())            
-        out_candidates = [node for node, count in counts.items() if count == max_count]
-
-        return out_candidates
-            
-            
     def get_first_ancestor_below_max_time(self, tree, node):
         if self.node_times[node] > self.max_time:
             return -1
@@ -198,7 +175,6 @@ class TSRelatives:
             parent_time = self.node_times[edge.parent]
             child_time = self.node_times[edge.child]
             if parent_time > self.max_time and child_time <= self.max_time:
-                # print("Adding", edge)
                 children.add(edge.child)
                 
         return children
@@ -224,8 +200,6 @@ class TSRelatives:
     def update_clusters(self, tree, diff, clusters):
         new_clusters = defaultdict(set)
         changed_samples = self.get_samples_below_edge_diff(tree, diff)
-        # print("Changed samples:", len(changed_samples))
-        # print("Num clusters:", len(clusters))
         
         ## First remove changed samples from existing clusters and update
         ## oldest anc if necessary
@@ -239,14 +213,10 @@ class TSRelatives:
         for sample in changed_samples:
             anc = self.get_first_ancestor_below_max_time(tree, sample)
             new_clusters[anc].add(sample)
-            
-        ## Sanity check - no clusters should share samples
-        # for c1, c2 in combinations(new_clusters.values(), 2):
-        #     assert len(c1.intersection(c2)) == 0
 
         return new_clusters
-        
-                
+
+
     def get_ibd(self):        
         n = self.ts.num_samples
         ibd_start = scipy.sparse.lil_matrix((n, n), dtype=int)
@@ -268,8 +238,6 @@ class TSRelatives:
         ## IBD starting at 0 is denoted by index 1.
         with tqdm(total=self.ts.num_trees, desc="Writing IBD pairs") as pbar:
             for i, (tree, diff) in enumerate(zip(trees, diffs)):
-                # if i % 1000 == 0:
-                #     print("Num clusters:", len(clusters))
                 for cluster in clusters.values():
                     ibd_pairs = combinations(sorted(cluster), 2)
                     for pair in ibd_pairs:
@@ -285,7 +253,7 @@ class TSRelatives:
                 clusters = self.update_clusters(tree, diff, clusters)
                 pbar.update(1)
         
-        ## TODO: Add last tree - integrate into main loop above
+        ## TODO: Last tree - should integrate into main loop above
             if self.ts.num_trees > 1:
                 i += 1
                 for cluster in clusters.values():
@@ -323,6 +291,7 @@ def plot_ibd(ibd_list, ca_times=None, min_length=0, out_file=None):
     
     ibd_df['count'] = 1
     inds = set(ibd_df['ind1'].values)
+    max_ibd_time_gens = 0
     for ind in inds:
         ind_df = ibd_df[ibd_df['ind1'] == ind]
         ind_pairwise_ibd_df = ind_df.groupby('ind2').sum()
@@ -341,8 +310,8 @@ def plot_ibd(ibd_list, ca_times=None, min_length=0, out_file=None):
                 x, y = sorted([ind, ind2[i]])
                 assert(x <= y)
                 colours.append(ca_times[x, y])
-                if colours[-1] == 0:
-                    print(x, y)
+                if colours[-1] > max_ibd_time_gens:
+                    max_ibd_time_gens = colours[-1]
 
             colours = np.array(colours)
             cmap = 'viridis'
@@ -352,24 +321,19 @@ def plot_ibd(ibd_list, ca_times=None, min_length=0, out_file=None):
     ax.set_ylabel('Number of IBD segments')
     ax.set_xlabel('Total IBD')
     ax.set_xscale('log')
+
+    ## Jump through a few hoops to set colourbar
+    sm = plt.cm.ScalarMappable(cmap='viridis',
+            norm=plt.Normalize(vmin=0, vmax=max_ibd_time_gens))
+    sm._A = []
+
+    cbar = fig.colorbar(sm, aspect=50, ax=ax)
+    cbar.ax.get_yaxis().labelpad = 5
+    cbar.ax.set_ylabel('TMRCA', rotation=90)
+
     print("Saving...")
     fig.savefig(out_file)
     print("Done!")
-
-
-def ibd_list_to_df(ibd_list, ca_times=None):
-    cols = ["ind1", "ind2", "start", "end"]
-
-    df = pd.DataFrame(np.array(tsr.ibd_list), columns=cols)
-    df['len'] = df['end'] - df['start']
-
-    
-    if ca_times is not None:
-        df['tmrca'] = df[['ind1', 'ind2']].apply(
-                lambda x: tsr.ca_times[x['ind1'], x['ind2']], axis=1
-                )
-    
-    return df
 
 
 def get_WG_recombination_map():
@@ -383,11 +347,6 @@ def get_WG_recombination_map():
 		1.077960694, 1.079243479, 0.61526812, 
 		0.72706815]
     chrom_lengths = [l * 1e8 for l in chrom_lengths_morgans]
-
-    # chrom_lengths = [247249719, 242951149, 199501827, 191273063, 180857866,
-    #         170899992, 158821424, 146274826, 140273252, 135374737, 134452384,
-    #         132349534, 114142980, 106368585, 100338915, 88827254, 78774742,
-    #         76117153, 63811651, 62435964, 46944323, 49691432]
     num_loci = int(chrom_lengths[-1] + 1)
 
     positions, rates = get_positions_rates(chrom_lengths, rho)
@@ -414,26 +373,6 @@ def simulate(Ne, sample_size, model, max_time):
             )
 
     return ts
-
-
-def load_triple_merger():
-    fname = 'test/test_data/small_triple_merger.h5'
-    print("A good max_time is 16")
-
-    return msprime.load(fname)
-
-
-def draw_trees(ts):
-    for t in ts.trees():
-        print(t.draw(format='unicode'))
-
-
-def run_tsr(ts, max_time=10):
-    tsr = TSRelatives(max_time, ts)
-    tsr.get_all_min_common_ancestor_times()
-    tsr.get_ibd()
-
-    return tsr
 
 
 def build_fname(label, ext, timestamp, args):
@@ -502,15 +441,32 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('--ts_file')
-    parser.add_argument('--Ne', type=int)
-    parser.add_argument('--sample_size', type=int)
-    parser.add_argument('--model', choices=['dtwf', 'hudson'])
-    parser.add_argument('--max_time', type=int, default=5)
-    parser.add_argument('--min_length', type=float, default=5e6)
-    parser.add_argument('--output_dir')
-    parser.add_argument('--split_chroms', action='store_true')
-    parser.add_argument('--plot', action='store_true')
+
+    metavar_str = ''
+    simulation_args = parser.add_argument_group("Simulation arguments")
+    simulation_args.add_argument('--sample_size', type=int, metavar=metavar_str)
+    simulation_args.add_argument('--model', choices=['dtwf', 'hudson'])
+    simulation_args.add_argument('--Ne', type=int, metavar=metavar_str)
+
+    ts_arg = parser.add_argument_group("Required if not simulating")
+    ts_arg.add_argument('--ts_file', metavar=metavar_str)
+
+    plot_args = parser.add_argument_group("Output args")
+    plot_args.add_argument('--output_dir', metavar=metavar_str)
+    plot_args.add_argument('--plot', action='store_true',
+            help="Flag to plot pairwise IBD distribution")
+
+    parser.add_argument('--max_time', type=int, default=5,
+            help="Max number of generations in the past to look for IBD"
+            " (default: %(default)s generations)",
+            metavar=metavar_str)
+    parser.add_argument('--min_length', type=float, default=5e6,
+            help="Ignore IBD segments shorter than this length (default:"
+            "%(default)i base pairs)",
+            metavar=metavar_str)
+    parser.add_argument('--split_chroms', action='store_true',
+            help="Flag to break IBD segments crossing chromosome boundaries"
+            " (default: %(default)s)")
 
     args = parser.parse_args()
 
