@@ -1,16 +1,18 @@
-import sys, os
-import msprime
-import numpy as np
-import scipy.sparse
+import os
+import argparse
 from collections import defaultdict
 from itertools import combinations
+from datetime import datetime
+
+import msprime
+import scipy.sparse
+import numpy as np
+import pandas as pd
+from tqdm import tqdm
+
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-import pandas as pd
-from tqdm import tqdm
-import argparse
-from datetime import datetime
 
 
 def get_positions_rates(chrom_lengths, rho):
@@ -88,9 +90,9 @@ class TSRelatives:
 
         for edge in edges_in + edges_out:
             oldest_relevant_anc = self.get_first_ancestor_below_max_time(
-                    tree,
-                    edge.child
-                    )
+                tree,
+                edge.child
+            )
             if oldest_relevant_anc >= 0:
                 nodes.add(oldest_relevant_anc)
 
@@ -226,7 +228,6 @@ class TSRelatives:
         trees = self.ts.trees()
         diffs = self.ts.edge_diffs()
         first_tree = next(trees)
-        first_diff = next(diffs)
         clusters = self.get_initial_clusters(first_tree)
         
         ## NOTE 1: We compute the upper-triangular portion of the IBD
@@ -323,29 +324,36 @@ def plot_ibd(ibd_list, ca_times=None, min_length=0, out_file=None):
     ax.set_xscale('log')
 
     ## Jump through a few hoops to set colourbar
-    sm = plt.cm.ScalarMappable(cmap='viridis',
-            norm=plt.Normalize(vmin=0, vmax=max_ibd_time_gens))
+    sm = plt.cm.ScalarMappable(
+        cmap='viridis',
+        norm=plt.Normalize(
+            vmin=0,
+            vmax=max_ibd_time_gens
+        )
+    )
     sm._A = []
 
     cbar = fig.colorbar(sm, aspect=50, ax=ax)
     cbar.ax.get_yaxis().labelpad = 5
     cbar.ax.set_ylabel('TMRCA', rotation=90)
 
-    print("Saving...")
+    print("Saving plot to", out_file)
     fig.savefig(out_file)
     print("Done!")
 
 
 def get_WG_recombination_map():
     rho = 1e-8
-    chrom_lengths_morgans = [2.77693825, 2.633496065, 2.24483368, 
-		2.12778391, 2.03765845, 1.929517394, 
-		1.867959329, 1.701765192, 1.68073935, 
-		1.789473882, 1.594854258, 1.72777271, 
-		1.26940475, 1.16331251, 1.2554709, 
-		1.348911043, 1.29292106, 1.18978483, 
-		1.077960694, 1.079243479, 0.61526812, 
-		0.72706815]
+    chrom_lengths_morgans = [
+            2.77693825, 2.633496065, 2.24483368,
+            2.12778391, 2.03765845, 1.929517394,
+            1.867959329, 1.701765192, 1.68073935,
+            1.789473882, 1.594854258, 1.72777271,
+            1.26940475, 1.16331251, 1.2554709,
+            1.348911043, 1.29292106, 1.18978483,
+            1.077960694, 1.079243479, 0.61526812,
+            0.72706815
+            ]
     chrom_lengths = [l * 1e8 for l in chrom_lengths_morgans]
     num_loci = int(chrom_lengths[-1] + 1)
 
@@ -443,7 +451,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
     metavar_str = ''
-    simulation_args = parser.add_argument_group("Simulation arguments")
+    simulation_args = parser.add_argument_group("Simulation arguments (whole-genome)")
     simulation_args.add_argument('--sample_size', type=int, metavar=metavar_str)
     simulation_args.add_argument('--model', choices=['dtwf', 'hudson'])
     simulation_args.add_argument('--Ne', type=int, metavar=metavar_str)
